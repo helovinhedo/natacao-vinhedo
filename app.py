@@ -5,7 +5,7 @@ import os
 import itertools
 from pypdf import PdfReader
 
-# --- DICIONÁRIOS DE ESTRUTURAÇÃO (CONFIGURAÇÕES DO TIME) ---
+# --- DICIONÁRIOS DE UNIFICAÇÃO (BLINDAGEM DE DADOS) ---
 
 DIC_ATLETAS = {
     "CLAUDIA": "CLAUDIA COLAMARINO",
@@ -138,14 +138,14 @@ def processar_pdf(pdf_file):
         
     linhas = texto_completo.split("\n")
     
-    # Varredura inteligente de cabeçalho para Metadados do Torneio
+    # Varredura inteligente de cabeçalho com aspas duplas corrigidas para evitar o erro do screenshot
     for l in linhas[:60]:
-        l_clean = re.sub(r'\', '', l).strip()
+        l_clean = re.sub(r"\", "", l).strip()
         l_up = l_clean.upper()
         if any(k in l_up for k in ["CAMPEONATO PAULISTA", "COPA NATAÇÃO", "COPA NATAÇAO", "TROFÉU", "TROFEU", "TORNEIO"]):
             if not any(x in l_up for x in ["RESULTADOS", "BALIZAMENTO", "PROVA"]):
                 local_etapa = l_clean
-        match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
+        match_d = re.search(r"(\d{2}/\d{2}/\d{4})", l)
         if match_d:
             data_prova = match_d.group(1)
 
@@ -153,9 +153,9 @@ def processar_pdf(pdf_file):
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper()
         
-        if "PROVA" in linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
+        if "PROVA" in inline_p = linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
             prova_atual = normalizar_prova(linha)
-        elif re.match(r'^PROVA\s+\d+', linha_upper.strip()):
+        elif re.match(r"^PROVA\s+\d+", linha_upper.strip()):
             partes_p = [linha]
             for j in range(1, 4):
                 if idx + j < len(linhas):
@@ -174,9 +174,8 @@ def processar_pdf(pdf_file):
             if any(w in linha_upper for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
                 tempo_final = "DQL" if ("DQL" in linha_upper or "DESCLA" in linha_upper) else "Ausente"
             else:
-                # Filtro Anti-Pontuação: Captura apenas cronômetros válidos e ignora pontos de tabela (ex: 10.00, 8.00)
-                match_minutos = re.findall(r'\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b', linha_limpa, re.IGNORECASE)
-                match_segundos = re.findall(r'\b\d{2}[\.,]\d{2}\b', linha_limpa)
+                match_minutos = re.findall(r"\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b", linha_limpa, re.IGNORECASE)
+                match_segundos = re.findall(r"\b\d{2}[\.,]\d{2}\b", linha_limpa)
                 
                 tempo_final = "S/T"
                 if match_minutos:
@@ -185,7 +184,6 @@ def processar_pdf(pdf_file):
                     candidatos = []
                     for c in match_segundos:
                         c_ponto = c.replace(',', '.')
-                        # Se terminar em .00 e for menor/igual a 20, estatisticamente é ponto de classificação, não tempo
                         if c_ponto.endswith('.00') and float(c_ponto) <= 20.0:
                             continue
                         candidatos.append(c)
@@ -201,20 +199,15 @@ def processar_pdf(pdf_file):
             
     return pd.DataFrame(linhas_encontradas)
 
-# --- INTERFACE FLUXO DE APLICAÇÃO ---
+# --- ENGINE INTERFACE ---
 
 CSV_FILE = "historico_vinhedo.csv"
 
-st.set_page_config(page_title="SEL Vinhedo - Swim Analytics", page_icon="🏊‍♂️", layout="wide")
-st.title("🏊‍♂️ Painel Avançado de Controle de Tempos - SEL Vinhedo")
-
-# Carregamento exclusivo via CSV Externo apartado
 if os.path.exists(CSV_FILE):
     df_historico = pd.read_csv(CSV_FILE)
 else:
     df_historico = pd.DataFrame(columns=["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"])
 
-# Limpeza e sincronização em tempo de execução
 if not df_historico.empty:
     df_historico["Atleta"] = df_historico["Atleta"].apply(normalizar_nome_atleta)
     df_historico["Prova"] = df_historico["Prova"].apply(normalizar_prova)
@@ -235,7 +228,7 @@ with aba1:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### 🥇 Melhores Tempos Históricos (PRs)")
+            st.markdown("#### 🥇 Recordes Pessoais Atuais (PRs)")
             if not df_validos.empty:
                 idx_melhores = df_validos.groupby("Prova")["Segundos"].idxmin()
                 df_prs = df_validos.loc[idx_melhores, ["Prova", "Tempo", "Data", "Local/Etapa"]].rename(columns={"Tempo": "Tempo Recorde"})
@@ -248,7 +241,7 @@ with aba1:
             df_cronologico = df_atleta.sort_values(by="Data_Dt", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
             st.dataframe(df_cronologico, use_container_width=True, hide_index=True)
     else:
-        st.info("O arquivo CSV histórico está vazio ou não foi encontrado. Alimente o sistema na aba 3.")
+        st.info("O arquivo CSV histórico está vazio ou não foi encontrado. Alimente o sistema na aba de 'Alimentar Sistema'.")
 
 with aba2:
     st.subheader("🚀 Simulador Estatístico de Revezamento Master (4x50m)")
@@ -308,7 +301,7 @@ with aba3:
                 else:
                     st.warning("Nenhum atleta mapeado encontrado nesse arquivo.")
     with col_manual:
-        st.markdown("### ✍️ Lançamento Manual (Treinos / Cronometragem de Borda)")
+        st.markdown("### ✍️ Lançamento Manual (Treinos / Borda)")
         lista_atletas_v = sorted(list(IDADES_BASE_ATLETAS.keys()))
         atleta_m = st.selectbox("Selecione o Atleta:", lista_atletas_v)
         prova_m = st.selectbox("Estilo/Distância da Prova:", [
@@ -316,15 +309,16 @@ with aba3:
             "100m Livre", "100m Peito", "100m Costas", "100m Borboleta", "100m Medley",
             "200m Livre", "200m Costas", "400m Livre"
         ])
+        gen_m = st.selectbox("Gênero:", ["Fem", "Masc"])
         data_m = st.date_input("Data da Coleta:")
-        local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo")
+        local_m = st.text_input("Etapa/Local:", value="Treino SEL Vinhedo")
         tempo_m = st.text_input("Tempo Registrado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC")
         
         if st.button("Gravar Tempo Manual"):
             if tempo_m and data_m:
                 t_padrao = padronizar_tempo_string(tempo_m)
                 nova_linha = pd.DataFrame([{
-                    "Data": data_m.strftime("%d/%m/%Y"), "Local/Etapa": local_m, "Prova": normalizar_prova(prova_m),
+                    "Data": data_m.strftime("%d/%m/%Y"), "Local/Etapa": local_m, "Prova": f"{prova_m} {gen_m}",
                     "Atleta": atleta_m, "Categoria": "Master", "Tempo": t_padrao
                 }])
                 df_total = pd.concat([df_historico, nova_linha]).drop_duplicates()
