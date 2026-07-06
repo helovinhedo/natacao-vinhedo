@@ -138,14 +138,14 @@ def processar_pdf(pdf_file):
         
     linhas = texto_completo.split("\n")
     
-    # Varredura inteligente de cabeçalho com aspas duplas corrigidas para evitar o erro do screenshot
+    # Varredura inteligente de cabeçalho (Sintaxe corrigida sem aspas perigosas)
     for l in linhas[:60]:
-        l_clean = re.sub(r"\", "", l).strip()
+        l_clean = re.sub(r'\', '', l).strip()
         l_up = l_clean.upper()
         if any(k in l_up for k in ["CAMPEONATO PAULISTA", "COPA NATAÇÃO", "COPA NATAÇAO", "TROFÉU", "TROFEU", "TORNEIO"]):
             if not any(x in l_up for x in ["RESULTADOS", "BALIZAMENTO", "PROVA"]):
                 local_etapa = l_clean
-        match_d = re.search(r"(\d{2}/\d{2}/\d{4})", l)
+        match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
         if match_d:
             data_prova = match_d.group(1)
 
@@ -153,13 +153,13 @@ def processar_pdf(pdf_file):
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper()
         
-        if "PROVA" in inline_p = linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
+        if "PROVA" in linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
             prova_atual = normalizar_prova(linha)
-        elif re.match(r"^PROVA\s+\d+", linha_upper.strip()):
+        elif re.match(r'^PROVA\s+\d+', linha_upper.strip()):
             partes_p = [linha]
             for j in range(1, 4):
                 if idx + j < len(linhas):
-                    next_l = linhas[idx+j].strip()
+                    next_l = autumn_l = linhas[idx+j].strip()
                     if any(w in next_l.upper() for w in ["LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY", "FEMININO", "MASCULINO", "MISTO", "FEM", "MASC"]):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
@@ -174,8 +174,8 @@ def processar_pdf(pdf_file):
             if any(w in linha_upper for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
                 tempo_final = "DQL" if ("DQL" in linha_upper or "DESCLA" in linha_upper) else "Ausente"
             else:
-                match_minutos = re.findall(r"\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b", linha_limpa, re.IGNORECASE)
-                match_segundos = re.findall(r"\b\d{2}[\.,]\d{2}\b", linha_limpa)
+                match_minutos = re.findall(r'\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b', linha_limpa, re.IGNORECASE)
+                match_segundos = re.findall(r'\b\d{2}[\.,]\d{2}\b', linha_limpa)
                 
                 tempo_final = "S/T"
                 if match_minutos:
@@ -228,7 +228,7 @@ with aba1:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### 🥇 Recordes Pessoais Atuais (PRs)")
+            st.markdown("#### 🥇 Melhores Tempos Históricos (PRs)")
             if not df_validos.empty:
                 idx_melhores = df_validos.groupby("Prova")["Segundos"].idxmin()
                 df_prs = df_validos.loc[idx_melhores, ["Prova", "Tempo", "Data", "Local/Etapa"]].rename(columns={"Tempo": "Tempo Recorde"})
@@ -301,7 +301,7 @@ with aba3:
                 else:
                     st.warning("Nenhum atleta mapeado encontrado nesse arquivo.")
     with col_manual:
-        st.markdown("### ✍️ Lançamento Manual (Treinos / Borda)")
+        st.markdown("### ✍️ Lançamento Manual (Treinos / Cronometragem de Borda)")
         lista_atletas_v = sorted(list(IDADES_BASE_ATLETAS.keys()))
         atleta_m = st.selectbox("Selecione o Atleta:", lista_atletas_v)
         prova_m = st.selectbox("Estilo/Distância da Prova:", [
@@ -311,7 +311,7 @@ with aba3:
         ])
         gen_m = st.selectbox("Gênero:", ["Fem", "Masc"])
         data_m = st.date_input("Data da Coleta:")
-        local_m = st.text_input("Etapa/Local:", value="Treino SEL Vinhedo")
+        local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo")
         tempo_m = st.text_input("Tempo Registrado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC")
         
         if st.button("Gravar Tempo Manual"):
