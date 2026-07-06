@@ -5,45 +5,49 @@ import os
 import itertools
 from pypdf import PdfReader
 
-# --- DICIONÁRIOS DE UNIFICAÇÃO (BLINDAGEM DE DADOS) ---
+st.set_page_config(page_title="Painel Natação Master", layout="wide")
+
+# --- DICIONÁRIOS DE UNIFICAÇÃO ---
 
 DIC_ATLETAS = {
-    "CLAUDIA": "CLAUDIA COLAMARINO",
-    "BRUNA": "BRUNA LIMA VICENTE",
-    "ÁLVARO": "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR",
-    "ALVARO": "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR",
-    "HIROSHI": "RAFAEL HIROSHI BRAZ DA SILVA",
-    "HELOISA": "HELOÍSA DE SOUSA EVANGELISTA",
-    "HELOÍSA": "HELOÍSA DE SOUSA EVANGELISTA",
-    "TALITA": "TALITA CLIOGIA BARBOSA",
-    "CALEBE": "CALEBE RAMOS RIBEIRO",
-    "MELLO": "RAFAEL MELLO",
-    "REGINA": "ANA REGINA OLIVAN LIMONGI",
-    "LARA": "LARA FERREIRA DE SOUZA TONIN",
-    "FABIUS": "FABIUS LUIZ PALARO",
-    "HELENA": "HELENA KIYOKA KOBAYASHI NABEIRO",
-    "TIAGO": "TIAGO BERNAL",
-    "VOLKER": "VOLKER PENK",
-    "MURILO": "MURILO SANTOS",
-    "LUCIANO": "LUCIANO DIAS GOBI",
-    "MATIAS": "MATIAS KOLBE",
-    "EDUARDO": "EDUARDO TREVISAN GONCALVES",
-    "MARIANE": "MARIANE DE MORAES QUIRINO",
-    "LARISSA": "LARISSA LIMA SOATO"
+    "CLAUDIA": "CLAUDIA COLAMARINO", "BRUNA": "BRUNA LIMA VICENTE",
+    "ÁLVARO": "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR", "ALVARO": "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR",
+    "HIROSHI": "RAFAEL HIROSHI BRAZ DA SILVA", "HELOISA": "HELOÍSA DE SOUSA EVANGELISTA",
+    "HELOÍSA": "HELOÍSA DE SOUSA EVANGELISTA", "TALITA": "TALITA CLIOGIA BARBOSA",
+    "CALEBE": "CALEBE RAMOS RIBEIRO", "MELLO": "RAFAEL MELLO",
+    "REGINA": "ANA REGINA OLIVAN LIMONGI", "LARA": "LARA FERREIRA DE SOUZA TONIN",
+    "FABIUS": "FABIUS LUIZ PALARO", "HELENA": "HELENA KIYOKA KOBAYASHI NABEIRO",
+    "TIAGO": "TIAGO BERNAL", "VOLKER": "VOLKER PENK",
+    "MURILO": "MURILO SANTOS", "LUCIANO": "LUCIANO DIAS GOBI",
+    "MATIAS": "MATIAS KOLBE", "EDUARDO": "EDUARDO TREVISAN GONCALVES",
+    "MARIANE": "MARIANE DE MORAES QUIRINO", "LARISSA": "LARISSA LIMA SOATO"
 }
 
-# Idades base dos atletas para cálculo automático de categoria de revezamento
-IDADES_BASE_ATLETAS = {
-    "CLAUDIA COLAMARINO": 55, "BRUNA LIMA VICENTE": 35, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 40,
-    "RAFAEL HIROSHI BRAZ DA SILVA": 35, "HELOÍSA DE SOUSA EVANGELISTA": 35, "TALITA CLIOGIA BARBOSA": 30,
-    "CALEBE RAMOS RIBEIRO": 35, "RAFAEL MELLO": 35, "ANA REGINA OLIVAN LIMONGI": 40,
-    "LARA FERREIRA DE SOUZA TONIN": 35, "FABIUS LUIZ PALARO": 50, "HELENA KIYOKA KOBAYASHI NABEIRO": 45,
-    "TIAGO BERNAL": 45, "VOLKER PENK": 55, "MURILO SANTOS": 20, "LUCIANO DIAS GOBI": 50,
-    "EDUARDO TREVISAN GONCALVES": 45, "MATIAS KOLBE": 40, "MARIANE DE MORAES QUIRINO": 30,
-    "LARISSA LIMA SOATO": 25
+# Anos de nascimento reais (Ajuste os valores para os dados corretos dos atletas)
+ANO_ATUAL = 2026
+ANOS_NASCIMENTO = {
+    "CLAUDIA COLAMARINO": 1971, "BRUNA LIMA VICENTE": 1991, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
+    "RAFAEL HIROSHI BRAZ DA SILVA": 1991, "HELOÍSA DE SOUSA EVANGELISTA": 1991, "TALITA CLIOGIA BARBOSA": 1996,
+    "CALEBE RAMOS RIBEIRO": 1991, "RAFAEL MELLO": 1991, "ANA REGINA OLIVAN LIMONGI": 1986,
+    "LARA FERREIRA DE SOUZA TONIN": 1991, "FABIUS LUIZ PALARO": 1976, "HELENA KIYOKA KOBAYASHI NABEIRO": 1981,
+    "TIAGO BERNAL": 1981, "VOLKER PENK": 1971, "MURILO SANTOS": 2006, "LUCIANO DIAS GOBI": 1976,
+    "EDUARDO TREVISAN GONCALVES": 1981, "MATIAS KOLBE": 1986, "MARIANE DE MORAES QUIRINO": 1996,
+    "LARISSA LIMA SOATO": 2001
 }
 
-# --- FUNÇÕES DE PADRONIZAÇÃO E LIMPEZA DE DADOS ---
+# --- FUNÇÕES DE PADRONIZAÇÃO E LIMPEZA ---
+
+def calcular_idade(atleta):
+    return ANO_ATUAL - ANOS_NASCIMENTO.get(atleta, ANO_ATUAL - 30) # Default de 30 anos se não cadastrado
+
+def obter_categoria_revezamento(soma_idades):
+    if soma_idades >= 320: return "320+"
+    elif soma_idades >= 280: return "280+"
+    elif soma_idades >= 240: return "240+"
+    elif soma_idades >= 200: return "200+"
+    elif soma_idades >= 160: return "160+"
+    elif soma_idades >= 120: return "120+"
+    else: return "100+"
 
 def normalizar_nome_atleta(nome_bruto):
     if not isinstance(nome_bruto, str): return "Atleta Desconhecido"
@@ -53,10 +57,8 @@ def normalizar_nome_atleta(nome_bruto):
     return "Atleta Desconhecido"
 
 def normalizar_prova(prova_str):
-    """ Dicionário de Provas Inteligente: Unifica escritas FAP/UNAMI por estilo """
     if not isinstance(prova_str, str): return "Estilo Não Identificado"
     p = prova_str.upper()
-    
     distancia = ""
     for d in ["25", "50", "100", "200", "400", "800", "1500"]:
         if d in p: 
@@ -75,10 +77,8 @@ def normalizar_prova(prova_str):
     elif "MASC" in p or "HOMEN" in p or "HOMENS" in p: genero = "Masc"
     elif "MISTO" in p: genero = "Misto"
     
-    if distancia and estilo and genero:
-        return f"{distancia} {estilo} {genero}"
-    elif distancia and estilo:
-        return f"{distancia} {estilo}"
+    if distancia and estilo and genero: return f"{distancia} {estilo} {genero}"
+    elif distancia and estilo: return f"{distancia} {estilo}"
     return " ".join(prova_str.split())
 
 def padronizar_tempo_string(tempo_str):
@@ -122,7 +122,7 @@ def obter_pr_revezamento(df, atleta, estilo_procurado):
     idx_min = df_validos["Segundos"].idxmin()
     return df_validos.loc[idx_min, "Segundos"], df_validos.loc[idx_min, "Tempo"]
 
-# --- CAPTURA AVANÇADA DE DADOS DO PDF ---
+# --- CAPTURA DE DADOS DO PDF ---
 
 def processar_pdf(pdf_file):
     reader = PdfReader(pdf_file)
@@ -138,9 +138,9 @@ def processar_pdf(pdf_file):
         
     linhas = texto_completo.split("\n")
     
-    # Varredura inteligente de cabeçalho (Sintaxe corrigida sem aspas perigosas)
+    # Sintaxe de escape corrigida na linha abaixo
     for l in linhas[:60]:
-        l_clean = re.sub(r'\', '', l).strip()
+        l_clean = l.replace("'", "").strip()
         l_up = l_clean.upper()
         if any(k in l_up for k in ["CAMPEONATO PAULISTA", "COPA NATAÇÃO", "COPA NATAÇAO", "TROFÉU", "TROFEU", "TORNEIO"]):
             if not any(x in l_up for x in ["RESULTADOS", "BALIZAMENTO", "PROVA"]):
@@ -149,7 +149,6 @@ def processar_pdf(pdf_file):
         if match_d:
             data_prova = match_d.group(1)
 
-    # Varredura de tabelas e linhas de atletas
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper()
         
@@ -159,7 +158,8 @@ def processar_pdf(pdf_file):
             partes_p = [linha]
             for j in range(1, 4):
                 if idx + j < len(linhas):
-                    next_l = autumn_l = linhas[idx+j].strip()
+                    # Variável não utilizada (autumn_l) corrigida
+                    next_l = linhas[idx+j].strip()
                     if any(w in next_l.upper() for w in ["LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY", "FEMININO", "MASCULINO", "MISTO", "FEM", "MASC"]):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
@@ -214,10 +214,10 @@ if not df_historico.empty:
     df_historico["Tempo"] = df_historico["Tempo"].apply(padronizar_tempo_string)
     df_historico = df_historico[df_historico["Atleta"] != "Atleta Desconhecido"]
 
-aba1, aba2, aba3, aba4 = st.tabs(["🔍 Consulta por Atleta", "🏊‍♂️ Simulador de Revezamentos", "📤 Alimentar Sistema", "🗄️ Base Geral CSV"])
+aba1, aba2, aba3, aba4 = st.tabs(["🔍 Consulta por Atleta", "🏊‍♂️ Simulador Automático de Revezamento", "📤 Alimentar Sistema", "🗄️ Base Geral CSV"])
 
 with aba1:
-    st.subheader("Ficha de Rendimento Individual")
+    st.title("Ficha de Rendimento Individual")
     if not df_historico.empty:
         lista_atletas = sorted(df_historico["Atleta"].unique())
         atleta_sel = st.selectbox("Selecione o Atleta:", lista_atletas)
@@ -225,6 +225,7 @@ with aba1:
         df_atleta = df_historico[df_historico["Atleta"] == atleta_sel].copy()
         df_atleta["Segundos"] = df_atleta["Tempo"].apply(tempo_para_segundos)
         df_validos = df_atleta[df_atleta["Segundos"].notna()].copy()
+        df_validos["Data_Dt"] = pd.to_datetime(df_validos["Data"], format="%d/%m/%Y", errors="coerce")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -237,58 +238,93 @@ with aba1:
                 st.warning("Este atleta não possui marcas numéricas válidas.")
         with col2:
             st.markdown("#### 📅 Histórico de Evolução Cronológica")
-            df_atleta["Data_Dt"] = pd.to_datetime(df_atleta["Data"], format="%d/%m/%Y", errors="coerce")
-            df_cronologico = df_atleta.sort_values(by="Data_Dt", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
+            df_cronologico = df_validos.sort_values(by="Data_Dt", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
             st.dataframe(df_cronologico, use_container_width=True, hide_index=True)
+            
+        st.markdown("---")
+        st.markdown("#### 📈 Gráfico de Evolução (Segundos)")
+        if not df_validos.empty:
+            df_grafico = df_validos.dropna(subset=["Data_Dt"]).sort_values("Data_Dt")
+            provas_disp = df_grafico["Prova"].unique()
+            abas_graficos = st.tabs(list(provas_disp))
+            
+            for i, prova_nome in enumerate(provas_disp):
+                with abas_graficos[i]:
+                    df_p = df_grafico[df_grafico["Prova"] == prova_nome]
+                    df_p["Data Formatada"] = df_p["Data_Dt"].dt.strftime("%d/%m/%Y")
+                    # Ajustando index para o gráfico ficar com a data no eixo X
+                    df_chart = df_p.set_index("Data Formatada")[["Segundos"]]
+                    st.line_chart(df_chart, use_container_width=True)
     else:
-        st.info("O arquivo CSV histórico está vazio ou não foi encontrado. Alimente o sistema na aba de 'Alimentar Sistema'.")
+        st.info("O arquivo CSV histórico está vazio ou não foi encontrado.")
 
 with aba2:
-    st.subheader("🚀 Simulador Estatístico de Revezamento Master (4x50m)")
-    tipo_rev = st.radio("Estilo:", ["4x50m Livre", "4x50m Medley"], horizontal=True)
-    lista_completa = sorted(list(IDADES_BASE_ATLETAS.keys()))
-    atletas_escolhidos = st.multiselect("Selecione EXATAMENTE 4 atletas:", lista_completa)
+    st.title("🚀 Inteligência Estratégica: Top Revezamentos")
+    st.markdown("Neste simulador, o sistema calcula **todas as combinações possíveis** dos atletas selecionados, calcula as categorias com base na idade real para o ano e sugere as melhores formações.")
     
-    if len(atletas_escolhidos) == 4:
-        soma_idades = sum(IDADES_BASE_ATLETAS[a] for a in atletas_escolhidos)
-        cat_rev = "320+" if soma_idades >= 320 else ("280+" if soma_idades >= 280 else ("240+" if soma_idades >= 240 else ("200+" if soma_idades >= 200 else ("160+" if soma_idades >= 160 else ("120+" if soma_idades >= 120 else "80+")))))
-        st.metric(label="Categoria Oficial", value=f"Classe {cat_rev}", delta=f"Idade Somada: {soma_idades} Anos")
-        
-        if tipo_rev == "4x50m Livre":
-            tempo_total_seg = 0.0
-            linhas_sim = []
-            for a in atletas_escolhidos:
-                seg, t_str = obter_pr_revezamento(df_historico, a, "Livre")
-                tempo_total_seg += seg if seg != float('inf') else 35.0
-                linhas_sim.append({"Atleta": a, "Estilo": "50m Livre", "PR Individual": t_str})
-            st.table(pd.DataFrame(linhas_sim))
-            st.subheader(f"⏱️ Tempo Total Estimado: {segundos_para_tempo(tempo_total_seg)}")
+    lista_completa = sorted(list(ANOS_NASCIMENTO.keys()))
+    atletas_pool = st.multiselect("Selecione a base de atletas para simular (Padrão: Todos):", lista_completa, default=lista_completa)
+    tipo_rev = st.radio("Estilo do Revezamento:", ["4x50m Livre", "4x50m Medley"], horizontal=True)
+    
+    if st.button("Gerar Melhores Combinações"):
+        if len(atletas_pool) < 4:
+            st.error("Selecione pelo menos 4 atletas para formar um revezamento.")
         else:
-            estilos_m = ["Costas", "Peito", "Borboleta", "Livre"]
-            mejor_t = float('inf')
-            mejor_comb = None
-            for perm in itertools.permutations(atletas_escolhidos):
-                t_cos, _ = obter_pr_revezamento(df_historico, perm[0], "Costas")
-                t_pei, _ = obter_pr_revezamento(df_historico, perm[1], "Peito")
-                t_bor, _ = obter_pr_revezamento(df_historico, perm[2], "Borboleta")
-                t_liv, _ = obter_pr_revezamento(df_historico, perm[3], "Livre")
-                soma = t_cos + t_pei + t_bor + t_liv
-                if soma < mejor_t:
-                    mejor_t = soma
-                    mejor_comb = perm
-            if mejor_t != float('inf'):
-                linhas_m = []
-                for i, est_n in enumerate(estilos_m):
-                    _, t_str = obter_pr_revezamento(df_historico, mejor_comb[i], est_n)
-                    linhas_m.append({"Ordem": f"{i+1}º Nadador", "Atleta": mejor_comb[i], "Estilo (50m)": est_n, "Tempo Estimado": t_str})
-                st.table(pd.DataFrame(linhas_m))
-                st.subheader(f"⏱️ Tempo Otimizado Medley: {segundos_para_tempo(mejor_t)}")
+            resultados = []
+            
+            if tipo_rev == "4x50m Livre":
+                for combo in itertools.combinations(atletas_pool, 4):
+                    tempos = [obter_pr_revezamento(df_historico, a, "Livre")[0] for a in combo]
+                    if float('inf') not in tempos:
+                        idade_total = sum(calcular_idade(a) for a in combo)
+                        cat = obter_categoria_revezamento(idade_total)
+                        resultados.append({
+                            "Equipe": " / ".join(combo), "Categoria": cat,
+                            "Soma Idades": idade_total, "Tempo Total (Seg)": sum(tempos),
+                            "Tempo Estimado": segundos_para_tempo(sum(tempos))
+                        })
+            else:
+                # 4x50m Medley
+                for combo in itertools.combinations(atletas_pool, 4):
+                    melhor_t = float('inf')
+                    melhor_ordem = None
+                    for perm in itertools.permutations(combo):
+                        t_cos, _ = obter_pr_revezamento(df_historico, perm[0], "Costas")
+                        t_pei, _ = obter_pr_revezamento(df_historico, perm[1], "Peito")
+                        t_bor, _ = obter_pr_revezamento(df_historico, perm[2], "Borboleta")
+                        t_liv, _ = obter_pr_revezamento(df_historico, perm[3], "Livre")
+                        soma = t_cos + t_pei + t_bor + t_liv
+                        if soma < melhor_t:
+                            melhor_t = soma
+                            melhor_ordem = perm
+                            
+                    if melhor_t != float('inf'):
+                        idade_total = sum(calcular_idade(a) for a in combo)
+                        cat = obter_categoria_revezamento(idade_total)
+                        resultados.append({
+                            "Equipe": f"Costas: {melhor_ordem[0]} / Peito: {melhor_ordem[1]} / Borboleta: {melhor_ordem[2]} / Livre: {melhor_ordem[3]}", 
+                            "Categoria": cat, "Soma Idades": idade_total, 
+                            "Tempo Total (Seg)": melhor_t, "Tempo Estimado": segundos_para_tempo(melhor_t)
+                        })
+
+            if resultados:
+                df_res = pd.DataFrame(resultados)
+                # Separa por categoria e pega os 3 melhores tempos
+                categorias_encontradas = sorted(df_res["Categoria"].unique(), reverse=True)
+                
+                for cat in categorias_encontradas:
+                    st.markdown(f"### 🏆 Categoria {cat}")
+                    df_cat = df_res[df_res["Categoria"] == cat].sort_values("Tempo Total (Seg)").head(3)
+                    st.table(df_cat[["Tempo Estimado", "Soma Idades", "Equipe"]])
+            else:
+                st.warning("Não há tempos válidos registrados para formar combinações completas com esses atletas neste estilo.")
 
 with aba3:
     st.subheader("Entrada de Dados e Atualização do Painel")
     c_pdf, col_manual = st.columns(2)
     with c_pdf:
         st.markdown("### 📤 Upload de Relatórios oficiais (PDF)")
+        st.markdown("*Aviso: Recomenda-se o uso de script auxiliar para grandes volumes. Esta função pode falhar em tabelas complexas.*")
         uploaded_file = st.file_uploader("Arraste o PDF aqui:", type=["pdf"])
         if uploaded_file is not None:
             if st.button("Processar e Fundir Dados"):
@@ -301,15 +337,15 @@ with aba3:
                 else:
                     st.warning("Nenhum atleta mapeado encontrado nesse arquivo.")
     with col_manual:
-        st.markdown("### ✍️ Lançamento Manual (Treinos / Cronometragem de Borda)")
-        lista_atletas_v = sorted(list(IDADES_BASE_ATLETAS.keys()))
+        st.markdown("### ✍️ Lançamento Manual (Treinos / Borda)")
+        lista_atletas_v = sorted(list(ANOS_NASCIMENTO.keys()))
         atleta_m = st.selectbox("Selecione o Atleta:", lista_atletas_v)
         prova_m = st.selectbox("Estilo/Distância da Prova:", [
             "50m Livre", "50m Peito", "50m Costas", "50m Borboleta",
             "100m Livre", "100m Peito", "100m Costas", "100m Borboleta", "100m Medley",
             "200m Livre", "200m Costas", "400m Livre"
         ])
-        gen_m = st.selectbox("Gênero:", ["Fem", "Masc"])
+        gen_m = st.selectbox("Gênero:", ["Fem", "Masc", "Misto"])
         data_m = st.date_input("Data da Coleta:")
         local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo")
         tempo_m = st.text_input("Tempo Registrado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC")
@@ -323,7 +359,7 @@ with aba3:
                 }])
                 df_total = pd.concat([df_historico, nova_linha]).drop_duplicates()
                 df_total.to_csv(CSV_FILE, index=False)
-                st.success("Tempo de treino adicionado com sucesso!")
+                st.success("Tempo adicionado com sucesso!")
                 st.rerun()
 
 with aba4:
