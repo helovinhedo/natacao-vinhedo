@@ -133,13 +133,10 @@ def obter_pr_revezamento(df, atleta, estilo_procurado):
 
 # --- CAPTURA DE DADOS DO PDF ---
 
-def processar_pdf(pdf_file):
+def processar_pdf(pdf_file, nome_evento_manual, data_evento_manual):
     reader = PdfReader(pdf_file)
     linhas_encontradas = []
     
-    data_prova = ""
-    campeonato_nome = ""
-    local_nome = ""
     prova_atual = "Não identificada"
     faixa_atual = "Master"
     
@@ -148,47 +145,10 @@ def processar_pdf(pdf_file):
         texto_completo += page.extract_text() + "\n"
         
     linhas = texto_completo.split("\n")
-    
-    # 1. CAPTURA DE CABEÇALHO GLOBAL (Sem limite de linhas)
-    for l in linhas:
-        l_up = l.upper().strip()
-        
-        # Pega a data
-        if not data_prova:
-            match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
-            if match_d:
-                data_prova = match_d.group(1)
-                
-        # Pega o nome do campeonato
-        if not campeonato_nome and any(k in l_up for k in ["CAMPEONATO", "COPA", "TROFÉU", "TORNEIO", "FESTIVAL", "CIRCUITO"]):
-            # Exclui linhas de controle
-            if not any(x in l_up for x in ["ABMN", "RESULTADOS", "SWIM IT UP", "PROVA", "FAIXA", "VISITE"]):
-                campeonato_nome = l.replace("'", "").strip()
-        
-        # Pega o local
-        if not local_nome and "-" in l_up and "/" in l_up:
-            # Exclui linhas como "04/07/2026 (25 METROS, 10 RAIAS)" ou links
-            if not any(x in l_up for x in ["METROS", "RAIAS", "DATA:", "VISITE", "PROVA", "PÁGINA"]):
-                local_nome = l.replace("'", "").strip()
-                
-        # Se achou os 3, não precisa mais perder tempo procurando cabeçalho
-        if campeonato_nome and local_nome and data_prova:
-            break
 
-    # Fallbacks de segurança
-    campeonato_nome = campeonato_nome if campeonato_nome else "Competição Não Identificada"
-    data_prova = data_prova if data_prova else "Data Não Identificada"
-    
-    if campeonato_nome != "Competição Não Identificada" and local_nome:
-        local_etapa_final = f"{campeonato_nome} - {local_nome}"
-    else:
-        local_etapa_final = campeonato_nome
-
-    # 2. VARREDURA DE ATLETAS E TEMPOS
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper().strip()
         
-        # Captura da Prova
         if "PROVA" in linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
             prova_atual = normalizar_prova(linha)
         elif re.match(r'^PROVA\s+\d+', linha_upper):
@@ -200,7 +160,6 @@ def processar_pdf(pdf_file):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
             
-        # Captura da Categoria (Faixa Etária)
         if "FAIXA:" in linha_upper:
             for j in range(0, 4):
                 if idx + j < len(linhas):
@@ -211,7 +170,6 @@ def processar_pdf(pdf_file):
                         faixa_atual = faixa_atual.replace("PRÉ- MASTER", "PRÉ-MASTER")
                         break
             
-        # Captura do Atleta e Tempo
         if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
             linha_limpa = linha.replace('"', '').replace(';', ' ').strip()
             atleta_final = normalizar_nome_atleta(linha_limpa)
@@ -233,8 +191,9 @@ def processar_pdf(pdf_file):
                     if candidatos:
                         tempo_final = padronizar_tempo_string(candidatos[0])
             
+            # Aqui usamos os dados manuais informados na interface!
             linhas_encontradas.append({
-                "Data": data_prova, "Local/Etapa": local_etapa_final, "Prova": prova_atual,
+                "Data": data_evento_manual, "Local/Etapa": nome_evento_manual, "Prova": prova_atual,
                 "Atleta": atleta_final, "Categoria": faixa_atual, "Tempo": tempo_final
             })
             
@@ -261,7 +220,7 @@ with aba1:
     st.title("Ficha de Rendimento Individual")
     if not df_historico.empty:
         lista_atletas = sorted(df_historico["Atleta"].unique())
-        atleta_sel = st.selectbox("Selecione o Atleta:", lista_atletas)
+        atleta_sel = st.selectbox("Selecione o Atleta:", lista_atletas, key="consulta_atleta")
         
         df_atleta = df_historico[df_historico["Atleta"] == atleta_sel].copy()
         df_atleta["Segundos"] = df_atleta["Tempo"].apply(tempo_para_segundos)
@@ -387,31 +346,42 @@ with aba3:
     c_pdf, col_manual = st.columns(2)
     with c_pdf:
         st.markdown("### 📤 Upload de Relatórios oficiais (PDF)")
-        st.markdown("*Agora otimizado para o padrão ABMN.*")
+        st.info("💡 **NOVO:** Para garantir 100% de precisão, digite o nome e a data da competição antes de enviar o PDF.")
+        
+        nome_evento_pdf = st.text_input("Nome/Local da Competição (Ex: Paulista de Inverno - Santo André):", key="nome_ev_pdf")
+        data_evento_pdf = st.date_input("Data da Competição:", key="data_ev_pdf")
+        
         uploaded_file = st.file_uploader("Arraste o PDF aqui:", type=["pdf"])
+        
         if uploaded_file is not None:
-            if st.button("Processar e Fundir Dados"):
-                df_novos = processar_pdf(uploaded_file)
-                if not df_novos.empty:
-                    df_total = pd.concat([df_historico, df_novos]).drop_duplicates(subset=["Data", "Prova", "Atleta", "Tempo"])
-                    df_total.to_csv(CSV_FILE, index=False)
-                    st.success(f"Sucesso! {len(df_novos)} novos tempos unificados na base!")
-                    st.rerun()
-                else:
-                    st.warning("Nenhum atleta mapeado foi encontrado neste arquivo.")
+            if not nome_evento_pdf:
+                st.warning("⚠️ Por favor, digite o Nome da Competição acima antes de processar.")
+            else:
+                if st.button("Processar e Fundir Dados"):
+                    data_formatada = data_evento_pdf.strftime("%d/%m/%Y")
+                    df_novos = processar_pdf(uploaded_file, nome_evento_pdf, data_formatada)
+                    
+                    if not df_novos.empty:
+                        df_total = pd.concat([df_historico, df_novos]).drop_duplicates(subset=["Data", "Prova", "Atleta", "Tempo"])
+                        df_total.to_csv(CSV_FILE, index=False)
+                        st.success(f"Sucesso! {len(df_novos)} novos tempos unificados na base!")
+                        st.rerun()
+                    else:
+                        st.warning("Nenhum atleta mapeado foi encontrado neste arquivo.")
+                        
     with col_manual:
         st.markdown("### ✍️ Lançamento Manual (Treinos / Borda)")
         lista_atletas_v = sorted(list(ANOS_NASCIMENTO.keys()))
-        atleta_m = st.selectbox("Selecione o Atleta:", lista_atletas_v)
+        atleta_m = st.selectbox("Selecione o Atleta:", lista_atletas_v, key="manual_atleta")
         prova_m = st.selectbox("Estilo/Distância da Prova:", [
             "50m Livre", "50m Peito", "50m Costas", "50m Borboleta",
             "100m Livre", "100m Peito", "100m Costas", "100m Borboleta", "100m Medley",
             "200m Livre", "200m Costas", "400m Livre"
-        ])
-        gen_m = st.selectbox("Gênero da Prova:", ["Fem", "Masc", "Misto"])
-        data_m = st.date_input("Data da Coleta:")
-        local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo")
-        tempo_m = st.text_input("Tempo Registrado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC")
+        ], key="manual_prova")
+        gen_m = st.selectbox("Gênero da Prova:", ["Fem", "Masc", "Misto"], key="manual_gen")
+        data_m = st.date_input("Data da Coleta:", key="manual_data")
+        local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo", key="manual_local")
+        tempo_m = st.text_input("Tempo Registrado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC", key="manual_tempo")
         
         if st.button("Gravar Tempo Manual"):
             if tempo_m and data_m:
