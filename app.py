@@ -1,6 +1,7 @@
-import streamlit as str
+import streamlit as st
 import pandas as pd
 import re
+import os
 from pypdf import PdfReader
 
 # --- FUNÇÕES DE PADRONIZAÇÃO E CORREÇÃO DE ERROS ---
@@ -130,12 +131,11 @@ def processar_pdf(pdf_file):
             atleta_bruto = "Atleta Vinhedo"
             for nome_chave in ["CLAUDIA", "BRUNA", "HELENA", "HELOISA", "LARA", "TALITA", "TIAGO", "ALVARO", "CALEBE", "FABIUS", "RAFAEL", "MATIAS", "LUCIANO", "VOLKER", "MURILO"]:
                 if nome_chave in linha_upper:
-                    # Captura uma aproximação do nome na linha
                     atleta_bruto = linha.split("VINHEDO")[-1].strip() if "VINHEDO" in linha_upper else linha
             
             atleta_final = normalizar_nome_atleta(atleta_bruto)
-            tempo_bruto = tempos[0] if tempos else "S/T"
-            tempo_final = padronizar_tempo_string(tempo_bruto)
+            tempo_final = tempos[0] if tempos else "S/T"
+            tempo_final = padronizar_tempo_string(tempo_final)
             
             if atleta_final != "ATLETA DESCONHECIDO":
                 linhas_encontradas.append({
@@ -153,10 +153,10 @@ def processar_pdf(pdf_file):
 
 CSV_FILE = "historico_vinhedo.csv"
 
-str.set_page_config(page_title="SEL Vinhedo - Swim PRs", page_icon="🏊‍♂️", layout="wide")
-str.title("🏊‍♂️ Painel de Controle de Tempos - SEL Vinhedo")
+st.set_page_config(page_title="SEL Vinhedo - Swim PRs", page_icon="🏊‍♂️", layout="wide")
+st.title("🏊‍♂️ Painel de Controle de Tempos - SEL Vinhedo")
 
-aba1, aba2, aba3 = str.tabs(["🔍 Pesquisar PRs de Atletas", "📤 Enviar Novo PDF", "🗄️ Histórico Geral"])
+aba1, aba2, aba3 = st.tabs(["🔍 Pesquisar PRs de Atletas", "📤 Enviar Novo PDF", "🗄️ Histórico Geral"])
 
 # Carrega e higieniza a base de dados ao abrir o app
 if os.path.exists(CSV_FILE):
@@ -168,11 +168,11 @@ else:
     df_historico = pd.DataFrame(columns=["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"])
 
 with aba1:
-    str.subheader("Recordes Pessoais Históricos (Personal Records)")
+    st.subheader("Recordes Pessoais Históricos (Personal Records)")
     
     if not df_historico.empty:
         lista_atletas = sorted(df_historico["Atleta"].dropna().unique())
-        atleta_sel = str.selectbox("Selecione o Atleta para checar as marcas:", lista_atletas)
+        atleta_sel = st.selectbox("Selecione o Atleta para checar as marcas:", lista_atletas)
         
         # Filtra histórico do atleta selecionado
         df_atleta = df_historico[df_historico["Atleta"] == atleta_sel]
@@ -190,26 +190,26 @@ with aba1:
         df_agrupado["Melhor Tempo (PR)"] = df_agrupado["Segundos"].apply(segundos_para_tempo)
         df_final_prs = df_agrupado[["Prova", "Melhor Tempo (PR)"]]
         
-        str.dataframe(df_final_prs, use_container_width=True, hide_index=True)
+        st.dataframe(df_final_prs, use_container_width=True, hide_index=True)
     else:
-        str.info("O histórico está vazio. Faça o upload de arquivos na segunda aba.")
+        st.info("O histórico está vazio. Faça o upload de arquivos na segunda aba.")
 
 with aba2:
-    str.subheader("Adicionar Resultados de Campeonatos")
-    uploaded_file = str.file_uploader("Escolha o PDF do campeonato", type=["pdf"])
+    st.subheader("Adicionar Resultados de Campeonatos")
+    uploaded_file = st.file_uploader("Escolha o PDF do campeonato", type=["pdf"])
     
     if uploaded_file is not None:
-        if str.button("Processar e Salvar Dados"):
-            with str.spinner("Processando e higienizando informações..."):
+        if st.button("Processar e Salvar Dados"):
+            with st.spinner("Processando e higienizando informações..."):
                 df_novos = processar_pdf(uploaded_file)
                 if not df_novos.empty:
                     df_total = pd.concat([df_historico, df_novos]).drop_duplicates(subset=["Data", "Prova", "Atleta", "Tempo"])
                     df_total.to_csv(CSV_FILE, index=False)
-                    str.success(f"Sucesso! {len(df_novos)} novos tempos processados e unificados no banco de dados!")
-                    str.rerun()
+                    st.success(f"Sucesso! {len(df_novos)} novos tempos processados e unificados no banco de dados!")
+                    st.rerun()
                 else:
-                    str.warning("Nenhum atleta da SEL Vinhedo foi localizado nas tabelas deste PDF.")
+                    st.warning("Nenhum atleta da SEL Vinhedo foi localizado nas tabelas deste PDF.")
 
 with aba3:
-    str.subheader("Base de Dados Histórica Consolidada")
-    str.dataframe(df_historico, use_container_width=True, hide_index=True)
+    st.subheader("Base de Dados Histórica Consolidada")
+    st.dataframe(df_historico, use_container_width=True, hide_index=True)
