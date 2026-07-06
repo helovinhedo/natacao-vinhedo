@@ -149,22 +149,33 @@ def processar_pdf(pdf_file):
         
     linhas = texto_completo.split("\n")
     
-    # 1. CAPTURA DE CABEÇALHO CEGA (Apenas as primeiras 20 linhas)
-    for l in linhas[:20]:
+    # 1. CAPTURA DE CABEÇALHO GLOBAL (Sem limite de linhas)
+    for l in linhas:
         l_up = l.upper().strip()
         
-        if not campeonato_nome and any(k in l_up for k in ["CAMPEONATO", "COPA", "TROFÉU", "TORNEIO", "FESTIVAL"]):
-            if "ABMN" not in l_up and "RESULTADOS" not in l_up:
+        # Pega a data
+        if not data_prova:
+            match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
+            if match_d:
+                data_prova = match_d.group(1)
+                
+        # Pega o nome do campeonato
+        if not campeonato_nome and any(k in l_up for k in ["CAMPEONATO", "COPA", "TROFÉU", "TORNEIO", "FESTIVAL", "CIRCUITO"]):
+            # Exclui linhas de controle
+            if not any(x in l_up for x in ["ABMN", "RESULTADOS", "SWIM IT UP", "PROVA", "FAIXA", "VISITE"]):
                 campeonato_nome = l.replace("'", "").strip()
         
-        match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
-        if match_d and not data_prova:
-            data_prova = match_d.group(1)
-            
-        if not local_nome and "-" in l_up and "/" in l_up and "METROS" not in l_up and "RAIAS" not in l_up:
-            if any(x in l_up for x in ["COMPLEXO", "CLUBE", "CENTRO", "SP", "RJ", "MG", "PR", "ASSOCIA"]):
+        # Pega o local
+        if not local_nome and "-" in l_up and "/" in l_up:
+            # Exclui linhas como "04/07/2026 (25 METROS, 10 RAIAS)" ou links
+            if not any(x in l_up for x in ["METROS", "RAIAS", "DATA:", "VISITE", "PROVA", "PÁGINA"]):
                 local_nome = l.replace("'", "").strip()
+                
+        # Se achou os 3, não precisa mais perder tempo procurando cabeçalho
+        if campeonato_nome and local_nome and data_prova:
+            break
 
+    # Fallbacks de segurança
     campeonato_nome = campeonato_nome if campeonato_nome else "Competição Não Identificada"
     data_prova = data_prova if data_prova else "Data Não Identificada"
     
@@ -177,6 +188,7 @@ def processar_pdf(pdf_file):
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper().strip()
         
+        # Captura da Prova
         if "PROVA" in linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
             prova_atual = normalizar_prova(linha)
         elif re.match(r'^PROVA\s+\d+', linha_upper):
@@ -188,6 +200,7 @@ def processar_pdf(pdf_file):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
             
+        # Captura da Categoria (Faixa Etária)
         if "FAIXA:" in linha_upper:
             for j in range(0, 4):
                 if idx + j < len(linhas):
@@ -198,6 +211,7 @@ def processar_pdf(pdf_file):
                         faixa_atual = faixa_atual.replace("PRÉ- MASTER", "PRÉ-MASTER")
                         break
             
+        # Captura do Atleta e Tempo
         if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
             linha_limpa = linha.replace('"', '').replace(';', ' ').strip()
             atleta_final = normalizar_nome_atleta(linha_limpa)
