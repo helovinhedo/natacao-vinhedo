@@ -23,7 +23,6 @@ DIC_ATLETAS = {
     "MARIANE": "MARIANE DE MORAES QUIRINO", "LARISSA": "LARISSA LIMA SOATO"
 }
 
-# Anos de nascimento reais (Ajuste os valores para os dados corretos)
 ANO_ATUAL = 2026
 ANOS_NASCIMENTO = {
     "CLAUDIA COLAMARINO": 1971, "BRUNA LIMA VICENTE": 1991, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
@@ -35,7 +34,6 @@ ANOS_NASCIMENTO = {
     "LARISSA LIMA SOATO": 2001
 }
 
-# Gênero dos atletas para o simulador de revezamento
 GENERO_ATLETAS = {
     "CLAUDIA COLAMARINO": "F", "BRUNA LIMA VICENTE": "F", "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": "M",
     "RAFAEL HIROSHI BRAZ DA SILVA": "M", "HELOÍSA DE SOUSA EVANGELISTA": "F", "TALITA CLIOGIA BARBOSA": "F",
@@ -151,26 +149,22 @@ def processar_pdf(pdf_file):
         
     linhas = texto_completo.split("\n")
     
-    # 1. CAPTURA DE CABEÇALHO CEGA (Apenas as primeiras 20 linhas do documento inteiro)
+    # 1. CAPTURA DE CABEÇALHO CEGA (Apenas as primeiras 20 linhas)
     for l in linhas[:20]:
         l_up = l.upper().strip()
         
-        # Pega o nome do campeonato
         if not campeonato_nome and any(k in l_up for k in ["CAMPEONATO", "COPA", "TROFÉU", "TORNEIO", "FESTIVAL"]):
             if "ABMN" not in l_up and "RESULTADOS" not in l_up:
                 campeonato_nome = l.replace("'", "").strip()
         
-        # Pega a data (qualquer formato dd/mm/aaaa)
         match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
         if match_d and not data_prova:
             data_prova = match_d.group(1)
             
-        # Pega o local filtrando coisas óbvias (como hifens de faixas etárias)
         if not local_nome and "-" in l_up and "/" in l_up and "METROS" not in l_up and "RAIAS" not in l_up:
             if any(x in l_up for x in ["COMPLEXO", "CLUBE", "CENTRO", "SP", "RJ", "MG", "PR", "ASSOCIA"]):
                 local_nome = l.replace("'", "").strip()
 
-    # Fallbacks se o cabeçalho for muito louco
     campeonato_nome = campeonato_nome if campeonato_nome else "Competição Não Identificada"
     data_prova = data_prova if data_prova else "Data Não Identificada"
     
@@ -183,7 +177,6 @@ def processar_pdf(pdf_file):
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper().strip()
         
-        # Captura da Prova
         if "PROVA" in linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
             prova_atual = normalizar_prova(linha)
         elif re.match(r'^PROVA\s+\d+', linha_upper):
@@ -195,18 +188,16 @@ def processar_pdf(pdf_file):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
             
-        # Captura da Categoria (Faixa Etária)
         if "FAIXA:" in linha_upper:
             for j in range(0, 4):
                 if idx + j < len(linhas):
                     busca_faixa = linhas[idx+j].upper().strip()
                     if "+" in busca_faixa or "MASTER" in busca_faixa:
                         faixa_limpa = busca_faixa.replace("FAIXA:", "").replace('"', '').replace(',', '').strip()
-                        faixa_atual = re.sub(r'-+', '', faixa_limpa).strip() # Limpa traços extras
+                        faixa_atual = re.sub(r'-+', '', faixa_limpa).strip()
                         faixa_atual = faixa_atual.replace("PRÉ- MASTER", "PRÉ-MASTER")
                         break
             
-        # Captura do Atleta e Tempo
         if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
             linha_limpa = linha.replace('"', '').replace(';', ' ').strip()
             atleta_final = normalizar_nome_atleta(linha_limpa)
@@ -224,7 +215,6 @@ def processar_pdf(pdf_file):
                 if match_minutos:
                     tempo_final = padronizar_tempo_string(match_minutos[0])
                 elif match_segundos:
-                    # Filtra falsos positivos (como pontuação da prova que costuma terminar em .00)
                     candidatos = [c for c in match_segundos if not (c.replace(',', '.').endswith('.00') and float(c.replace(',', '.')) <= 20.0)]
                     if candidatos:
                         tempo_final = padronizar_tempo_string(candidatos[0])
@@ -262,28 +252,33 @@ with aba1:
         df_atleta = df_historico[df_historico["Atleta"] == atleta_sel].copy()
         df_atleta["Segundos"] = df_atleta["Tempo"].apply(tempo_para_segundos)
         df_validos = df_atleta[df_atleta["Segundos"].notna()].copy()
-        
-        # Converte para datetime real para ordenação correta no gráfico
         df_validos["Data_Dt"] = pd.to_datetime(df_validos["Data"], format="%d/%m/%Y", errors="coerce")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### 🥇 Melhores Tempos Históricos (PRs)")
-            if not df_validos.empty:
-                idx_melhores = df_validos.groupby("Prova")["Segundos"].idxmin()
-                df_prs = df_validos.loc[idx_melhores, ["Prova", "Tempo", "Data", "Local/Etapa"]].rename(columns={"Tempo": "Tempo Recorde"})
-                st.dataframe(df_prs, use_container_width=True, hide_index=True)
-            else:
-                st.warning("Este atleta não possui marcas numéricas válidas.")
-        with col2:
-            st.markdown("#### 📅 Histórico de Evolução Cronológica")
-            df_cronologico = df_validos.sort_values(by="Data_Dt", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
-            st.dataframe(df_cronologico, use_container_width=True, hide_index=True)
+        st.markdown("#### 🥇 Melhores Tempos Históricos (PRs)")
+        if not df_validos.empty:
+            idx_melhores = df_validos.groupby("Prova")["Segundos"].idxmin()
+            df_prs = df_validos.loc[idx_melhores, ["Prova", "Tempo", "Data", "Local/Etapa"]].rename(columns={"Tempo": "Tempo Recorde"})
+            
+            styler_prs = df_prs.style.set_properties(**{
+                'background-color': '#fffbe6',
+                'color': '#333333',
+                'border-color': 'white',
+                'font-weight': 'bold'
+            })
+            
+            st.dataframe(styler_prs, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Este atleta não possui marcas numéricas válidas.")
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        st.markdown("#### 📅 Histórico de Evolução Cronológica")
+        df_cronologico = df_validos.sort_values(by="Data_Dt", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
+        st.dataframe(df_cronologico, use_container_width=True, hide_index=True)
             
         st.markdown("---")
         st.markdown("#### 📈 Gráfico de Evolução (Segundos)")
         if not df_validos.empty:
-            # Ordena estritamente pela data verdadeira
             df_grafico = df_validos.dropna(subset=["Data_Dt"]).sort_values("Data_Dt")
             provas_disp = df_grafico["Prova"].unique()
             abas_graficos = st.tabs(list(provas_disp))
@@ -291,10 +286,7 @@ with aba1:
             for i, prova_nome in enumerate(provas_disp):
                 with abas_graficos[i]:
                     df_p = df_grafico[df_grafico["Prova"] == prova_nome].copy()
-                    
-                    # Definimos o índice como o objeto datetime verdadeiro para que o eixo X fique cronológico
                     df_chart = df_p.set_index("Data_Dt")[["Segundos"]]
-                    
                     st.line_chart(df_chart, use_container_width=True)
     else:
         st.info("O arquivo CSV histórico está vazio ou não foi encontrado.")
@@ -313,7 +305,6 @@ with aba2:
         genero_rev = st.radio("Categoria de Gênero:", ["Feminino", "Masculino", "Misto"], horizontal=True)
     
     if st.button("Gerar Melhores Combinações"):
-        # Filtro Matemático de Gênero
         homens = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'M']
         mulheres = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'F']
         
@@ -344,7 +335,6 @@ with aba2:
                             "Tempo Estimado": segundos_para_tempo(sum(tempos))
                         })
             else:
-                # 4x50m Medley
                 for combo in combinacoes_validas:
                     melhor_t = float('inf')
                     melhor_ordem = None
@@ -422,5 +412,39 @@ with aba3:
                 st.rerun()
 
 with aba4:
-    st.subheader("Visualização Bruta do Histórico Permanente (CSV)")
+    st.subheader("🗄️ Gerenciamento da Base de Dados (CSV)")
+    
+    col_download, col_upload = st.columns(2)
+    
+    with col_download:
+        st.markdown("### 📥 Salvar Backup")
+        st.markdown("Faça o download da base atual antes de atualizar o código no GitHub para não perder dados.")
+        if not df_historico.empty:
+            csv_export = df_historico.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="Baixar historico_vinhedo.csv",
+                data=csv_export,
+                file_name='historico_vinhedo.csv',
+                mime='text/csv',
+                type="primary"
+            )
+        else:
+            st.info("A base está vazia. Nada para baixar.")
+            
+    with col_upload:
+        st.markdown("### 🔄 Restaurar Backup")
+        st.markdown("Se o servidor resetou, faça o upload do seu CSV salvo aqui para restaurar a base.")
+        backup_file = st.file_uploader("Envie o backup (CSV):", type=["csv"])
+        if backup_file is not None:
+            if st.button("Restaurar Base de Dados"):
+                try:
+                    df_backup = pd.read_csv(backup_file)
+                    df_backup.to_csv(CSV_FILE, index=False)
+                    st.success("Base restaurada com sucesso! A página será atualizada.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao ler o arquivo: {e}")
+
+    st.markdown("---")
+    st.markdown("### Visualização Bruta do Histórico Permanente")
     st.dataframe(df_historico, use_container_width=True, hide_index=True)
