@@ -5,7 +5,7 @@ import os
 import itertools
 from pypdf import PdfReader
 
-# --- DICIONÁRIOS DE UNIFICAÇÃO (BLINDAGEM DE DADOS) ---
+# --- DICIONÁRIOS DE ESTRUTURAÇÃO (CONFIGURAÇÕES DO TIME) ---
 
 DIC_ATLETAS = {
     "CLAUDIA": "CLAUDIA COLAMARINO",
@@ -22,25 +22,28 @@ DIC_ATLETAS = {
     "LARA": "LARA FERREIRA DE SOUZA TONIN",
     "FABIUS": "FABIUS LUIZ PALARO",
     "HELENA": "HELENA KIYOKA KOBAYASHI NABEIRO",
-    "TIAGO": "TIAGO BERNAL"
+    "TIAGO": "TIAGO BERNAL",
+    "VOLKER": "VOLKER PENK",
+    "MURILO": "MURILO SANTOS",
+    "LUCIANO": "LUCIANO DIAS GOBI",
+    "MATIAS": "MATIAS KOLBE",
+    "EDUARDO": "EDUARDO TREVISAN GONCALVES",
+    "MARIANE": "MARIANE DE MORAES QUIRINO",
+    "LARISSA": "LARISSA LIMA SOATO"
 }
 
-# Mapeamento de idades base por categoria para cálculo de revezamento master
+# Idades base dos atletas para cálculo automático de categoria de revezamento
 IDADES_BASE_ATLETAS = {
-    "CLAUDIA COLAMARINO": 55,
-    "BRUNA LIMA VICENTE": 35,
-    "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 40,
-    "RAFAEL HIROSHI BRAZ DA SILVA": 35,
-    "HELOÍSA DE SOUSA EVANGELISTA": 35,
-    "TALITA CLIOGIA BARBOSA": 30,
-    "CALEBE RAMOS RIBEIRO": 35,
-    "RAFAEL MELLO": 35,
-    "ANA REGINA OLIVAN LIMONGI": 40,
-    "LARA FERREIRA DE SOUZA TONIN": 35,
-    "FABIUS LUIZ PALARO": 50,
-    "HELENA KIYOKA KOBAYASHI NABEIRO": 45,
-    "TIAGO BERNAL": 45
+    "CLAUDIA COLAMARINO": 55, "BRUNA LIMA VICENTE": 35, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 40,
+    "RAFAEL HIROSHI BRAZ DA SILVA": 35, "HELOÍSA DE SOUSA EVANGELISTA": 35, "TALITA CLIOGIA BARBOSA": 30,
+    "CALEBE RAMOS RIBEIRO": 35, "RAFAEL MELLO": 35, "ANA REGINA OLIVAN LIMONGI": 40,
+    "LARA FERREIRA DE SOUZA TONIN": 35, "FABIUS LUIZ PALARO": 50, "HELENA KIYOKA KOBAYASHI NABEIRO": 45,
+    "TIAGO BERNAL": 45, "VOLKER PENK": 55, "MURILO SANTOS": 20, "LUCIANO DIAS GOBI": 50,
+    "EDUARDO TREVISAN GONCALVES": 45, "MATIAS KOLBE": 40, "MARIANE DE MORAES QUIRINO": 30,
+    "LARISSA LIMA SOATO": 25
 }
+
+# --- FUNÇÕES DE PADRONIZAÇÃO E LIMPEZA DE DADOS ---
 
 def normalizar_nome_atleta(nome_bruto):
     if not isinstance(nome_bruto, str): return "Atleta Desconhecido"
@@ -50,12 +53,12 @@ def normalizar_nome_atleta(nome_bruto):
     return "Atleta Desconhecido"
 
 def normalizar_prova(prova_str):
-    """ DICIONÁRIO DE PROVAS INTELIGENTE: Identifica distância, estilo e gênero de qualquer string """
+    """ Dicionário de Provas Inteligente: Unifica escritas FAP/UNAMI por estilo """
     if not isinstance(prova_str, str): return "Estilo Não Identificado"
     p = prova_str.upper()
     
     distancia = ""
-    for d in ["50", "100", "200", "400", "800", "1500"]:
+    for d in ["25", "50", "100", "200", "400", "800", "1500"]:
         if d in p: 
             distancia = f"{d}m"
             break
@@ -69,12 +72,14 @@ def normalizar_prova(prova_str):
     
     genero = ""
     if "FEM" in p or "MOÇAS" in p or "MULHERES" in p: genero = "Fem"
-    elif "MASC" in p or "RAPAZES" in p or "HOMENS" in p: genero = "Masc"
+    elif "MASC" in p or "HOMEN" in p or "HOMENS" in p: genero = "Masc"
     elif "MISTO" in p: genero = "Misto"
     
-    if distancia and estilo and genero: return f"{distancia} {estilo} {genero}"
-    if distancia and estilo: return f"{distancia} {estilo}"
-    return " ".join(prova_str.split()).title()
+    if distancia and estilo and genero:
+        return f"{distancia} {estilo} {genero}"
+    elif distancia and estilo:
+        return f"{distancia} {estilo}"
+    return " ".join(prova_str.split())
 
 def padronizar_tempo_string(tempo_str):
     t_clean = str(tempo_str).lower().strip().replace("c", "").replace("s", ".").replace("m", ":")
@@ -101,78 +106,128 @@ def segundos_para_tempo(segundos_float):
     minutos = int(segundos_float // 60)
     segundos = int(segundos_float % 60)
     centesimos = int(round((segundos_float % 1) * 100))
+    if centesimos >= 100:
+        segundos += 1
+        centesimos -= 100
     if minutos > 0: return f"{minutos}:{segundos:02d}.{centesimos:02d}"
     return f"{segundos:02d}.{centesimos:02d}"
-
-# --- TRATAMENTO DE REVEZAMENTO ---
 
 def obter_pr_revezamento(df, atleta, estilo_procurado):
     df_atleta = df[(df["Atleta"] == atleta) & (df["Tempo"].notna())]
     df_prova = df_atleta[df_atleta["Prova"].str.contains(estilo_procurado, case=False)]
-    
     df_prova = df_prova.copy()
     df_prova["Segundos"] = df_prova["Tempo"].apply(tempo_para_segundos)
     df_validos = df_prova[df_prova["Segundos"].notna()]
-    
     if df_validos.empty: return float('inf'), "S/T"
     idx_min = df_validos["Segundos"].idxmin()
     return df_validos.loc[idx_min, "Segundos"], df_validos.loc[idx_min, "Tempo"]
 
-# --- PROCESSAMENTO DO PDF ---
+# --- CAPTURA AVANÇADA DE DADOS DO PDF ---
 
 def processar_pdf(pdf_file):
     reader = PdfReader(pdf_file)
     linhas_encontradas = []
-    data_prova, local_etapa, prova_atual = "Disponível no PDF", "Campeonato de Natação", "Não identificada"
+    
+    data_prova = "Disponível no PDF"
+    local_etapa = "Campeonato de Natação"
+    prova_atual = "Não identificada"
     
     texto_completo = ""
-    for page in reader.pages: texto_completo += page.extract_text() + "\n"
+    for page in reader.pages:
+        texto_completo += page.extract_text() + "\n"
+        
     linhas = texto_completo.split("\n")
     
-    for linha in linhas:
+    # Varredura inteligente de cabeçalho para Metadados do Torneio
+    for l in linhas[:60]:
+        l_clean = re.sub(r'\', '', l).strip()
+        l_up = l_clean.upper()
+        if any(k in l_up for k in ["CAMPEONATO PAULISTA", "COPA NATAÇÃO", "COPA NATAÇAO", "TROFÉU", "TROFEU", "TORNEIO"]):
+            if not any(x in l_up for x in ["RESULTADOS", "BALIZAMENTO", "PROVA"]):
+                local_etapa = l_clean
+        match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
+        if match_d:
+            data_prova = match_d.group(1)
+
+    # Varredura de tabelas e linhas de atletas
+    for idx, linha in enumerate(linhas):
         linha_upper = linha.upper()
-        if "PROVA" in linha_upper and "METROS" in linha_upper: prova_atual = normalizar_prova(linha)
-        if "DATA:" in linha_upper:
-            match_data = re.search(r'(\d{2}/\d{2}/\d{4})', linha)
-            if match_data: data_prova = match_data.group(1)
+        
+        if "PROVA" in linha_upper and any(w in linha_upper for w in ["METROS", "LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY"]):
+            prova_atual = normalizar_prova(linha)
+        elif re.match(r'^PROVA\s+\d+', linha_upper.strip()):
+            partes_p = [linha]
+            for j in range(1, 4):
+                if idx + j < len(linhas):
+                    next_l = linhas[idx+j].strip()
+                    if any(w in next_l.upper() for w in ["LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY", "FEMININO", "MASCULINO", "MISTO", "FEM", "MASC"]):
+                        partes_p.append(next_l)
+            prova_atual = normalizar_prova(" ".join(partes_p))
             
         if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
-            partes = linha.split()
-            tempos = [p for p in partes if re.match(r'^(\d+[:m]\d+[:s]\d+c?|\d+[\.,]\d+|\d+s\d+c)$', p)]
-            tempo_bruto = tempos[0] if tempos else "S/T"
-            tempo_final = padronizar_tempo_string(tempo_bruto)
-            atleta_final = normalizar_nome_atleta(linha)
+            linha_limpa = linha.replace('"', '').replace(';', ' ').strip()
+            atleta_final = normalizar_nome_atleta(linha_limpa)
             
-            if atleta_final != "Atleta Desconhecido":
-                linhas_encontradas.append({
-                    "Data": data_prova, "Local/Etapa": local_etapa, "Prova": prova_atual,
-                    "Atleta": atleta_final, "Categoria": "Master", "Tempo": tempo_final
-                })
+            if atleta_final == "Atleta Desconhecido":
+                continue
+                
+            if any(w in linha_upper for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
+                tempo_final = "DQL" if ("DQL" in linha_upper or "DESCLA" in linha_upper) else "Ausente"
+            else:
+                # Filtro Anti-Pontuação: Captura apenas cronômetros válidos e ignora pontos de tabela (ex: 10.00, 8.00)
+                match_minutos = re.findall(r'\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b', linha_limpa, re.IGNORECASE)
+                match_segundos = re.findall(r'\b\d{2}[\.,]\d{2}\b', linha_limpa)
+                
+                tempo_final = "S/T"
+                if match_minutos:
+                    tempo_final = padronizar_tempo_string(match_minutos[0])
+                elif match_segundos:
+                    candidatos = []
+                    for c in match_segundos:
+                        c_ponto = c.replace(',', '.')
+                        # Se terminar em .00 e for menor/igual a 20, estatisticamente é ponto de classificação, não tempo
+                        if c_ponto.endswith('.00') and float(c_ponto) <= 20.0:
+                            continue
+                        candidatos.append(c)
+                    if candidatos:
+                        tempo_final = padronizar_tempo_string(candidatos[0])
+                    elif match_segundos:
+                        tempo_final = padronizar_tempo_string(match_segundos[0])
+            
+            linhas_encontradas.append({
+                "Data": data_prova, "Local/Etapa": local_etapa, "Prova": prova_atual,
+                "Atleta": atleta_final, "Categoria": "Master", "Tempo": tempo_final
+            })
+            
     return pd.DataFrame(linhas_encontradas)
 
-# --- CONFIGURAÇÃO DA INTERFACE ---
+# --- INTERFACE FLUXO DE APLICAÇÃO ---
 
 CSV_FILE = "historico_vinhedo.csv"
+
 st.set_page_config(page_title="SEL Vinhedo - Swim Analytics", page_icon="🏊‍♂️", layout="wide")
 st.title("🏊‍♂️ Painel Avançado de Controle de Tempos - SEL Vinhedo")
 
+# Carregamento exclusivo via CSV Externo apartado
 if os.path.exists(CSV_FILE):
     df_historico = pd.read_csv(CSV_FILE)
+else:
+    df_historico = pd.DataFrame(columns=["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"])
+
+# Limpeza e sincronização em tempo de execução
+if not df_historico.empty:
     df_historico["Atleta"] = df_historico["Atleta"].apply(normalizar_nome_atleta)
     df_historico["Prova"] = df_historico["Prova"].apply(normalizar_prova)
     df_historico["Tempo"] = df_historico["Tempo"].apply(padronizar_tempo_string)
     df_historico = df_historico[df_historico["Atleta"] != "Atleta Desconhecido"]
-else:
-    df_historico = pd.DataFrame(columns=["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"])
 
-menu_abas = ["🔍 Consulta por Atleta", "🏊‍♂️ Simulador de Revezamentos", "📥 Alimentar Sistema", "🗄️ Base Geral CSV"]
-aba1, aba2, aba3, aba4 = st.tabs(menu_abas)
+aba1, aba2, aba3, aba4 = st.tabs(["🔍 Consulta por Atleta", "🏊‍♂️ Simulador de Revezamentos", "📤 Alimentar Sistema", "🗄️ Base Geral CSV"])
 
 with aba1:
     st.subheader("Ficha de Rendimento Individual")
     if not df_historico.empty:
         lista_atletas = sorted(df_historico["Atleta"].unique())
-        atleta_sel = st.selectbox("Selecione o Atleta:", lista_atletas, key="busca_atleta")
+        atleta_sel = st.selectbox("Selecione o Atleta:", lista_atletas)
         
         df_atleta = df_historico[df_historico["Atleta"] == atleta_sel].copy()
         df_atleta["Segundos"] = df_atleta["Tempo"].apply(tempo_para_segundos)
@@ -180,113 +235,86 @@ with aba1:
         
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown("#### 🥇 Recordes Pessoais Atuais (PRs)")
+            st.markdown("#### 🥇 Melhores Tempos Históricos (PRs)")
             if not df_validos.empty:
                 idx_melhores = df_validos.groupby("Prova")["Segundos"].idxmin()
                 df_prs = df_validos.loc[idx_melhores, ["Prova", "Tempo", "Data", "Local/Etapa"]].rename(columns={"Tempo": "Tempo Recorde"})
                 st.dataframe(df_prs, use_container_width=True, hide_index=True)
             else:
-                st.warning("Sem tempos válidos calculados.")
-                
+                st.warning("Este atleta não possui marcas numéricas válidas.")
         with col2:
-            st.markdown("#### 📅 Histórico Cronológico de Provas")
-            try:
-                df_atleta["Data_Formatada"] = pd.to_datetime(df_atleta["Data"], format="%d/%m/%Y", errors="coerce")
-                df_cronologico = df_atleta.sort_values(by="Data_Formatada", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
-                st.dataframe(df_cronologico, use_container_width=True, hide_index=True)
-            except:
-                st.dataframe(df_atleta[["Data", "Local/Etapa", "Prova", "Tempo"]], use_container_width=True, hide_index=True)
+            st.markdown("#### 📅 Histórico de Evolução Cronológica")
+            df_atleta["Data_Dt"] = pd.to_datetime(df_atleta["Data"], format="%d/%m/%Y", errors="coerce")
+            df_cronologico = df_atleta.sort_values(by="Data_Dt", ascending=False)[["Data", "Local/Etapa", "Prova", "Tempo"]]
+            st.dataframe(df_cronologico, use_container_width=True, hide_index=True)
+    else:
+        st.info("O arquivo CSV histórico está vazio ou não foi encontrado. Alimente o sistema na aba 3.")
 
 with aba2:
     st.subheader("🚀 Simulador Estatístico de Revezamento Master (4x50m)")
-    if not df_historico.empty:
-        tipo_rev = st.radio("Estilo do Revezamento:", ["4x50m Livre", "4x50m Medley"], horizontal=True)
-        tipo_gen = st.radio("Gênero do Revezamento:", ["Masculino", "Feminino", "Misto"], horizontal=True)
+    tipo_rev = st.radio("Estilo:", ["4x50m Livre", "4x50m Medley"], horizontal=True)
+    lista_completa = sorted(list(IDADES_BASE_ATLETAS.keys()))
+    atletas_escolhidos = st.multiselect("Selecione EXATAMENTE 4 atletas:", lista_completa)
+    
+    if len(atletas_escolhidos) == 4:
+        soma_idades = sum(IDADES_BASE_ATLETAS[a] for a in atletas_escolhidos)
+        cat_rev = "320+" if soma_idades >= 320 else ("280+" if soma_idades >= 280 else ("240+" if soma_idades >= 240 else ("200+" if soma_idades >= 200 else ("160+" if soma_idades >= 160 else ("120+" if soma_idades >= 120 else "80+")))))
+        st.metric(label="Categoria Oficial", value=f"Classe {cat_rev}", delta=f"Idade Somada: {soma_idades} Anos")
         
-        lista_completa = sorted(list(IDADES_BASE_ATLETAS.keys()))
-        atletas_escolhidos = st.multiselect("Selecione EXATAMENTE 4 atletas para montar o quarteto:", lista_completa)
-        
-        if len(atletas_escolhidos) == 4:
-            st.markdown("---")
-            # Validação de gênero se não for misto
-            # Cálculo de Categoria
-            soma_idades = sum(IDADES_BASE_ATLETAS[a] for a in atletas_escolhidos)
-            cat_rev = "320+" if soma_idades >= 320 else ("280+" if soma_idades >= 280 else ("240+" if soma_idades >= 240 else ("200+" if soma_idades >= 200 else ("160+" if soma_idades >= 160 else ("120+" if soma_idades >= 120 else "80+")))))
-            
-            st.metric(label="Categoria Oficial do Revezamento", value=f"Classe {cat_rev}", delta=f"Soma das Idades Base: {soma_idades} Anos")
-            
-            if tipo_rev == "4x50m Livre":
-                st.markdown("#### Formação Sugerida (Ordem de Entrada Livre)")
-                tempo_total_seg = 0.0
-                linhas_simulacao = []
-                for a in atletas_escolhidos:
-                    seg, t_str = obter_pr_revezamento(df_historico, a, "50m Livre")
-                    tempo_total_seg += seg if seg != float('inf') else 30.0 # penalidade se não tiver tempo
-                    linhas_simulacao.append({"Atleta": a, "Estilo/Nado": "50m Livre", "Melhor Tempo Individual": t_str})
-                st.table(pd.DataFrame(linhas_simulacao))
-                st.subheader(f"⏱️ Tempo Total Estimado do Revezamento: {segundos_para_tempo(tempo_total_seg)}")
-                
-            elif tipo_rev == "4x50m Medley":
-                st.markdown("#### 🧠 Otimização Algorítmica de Formação Medley (Mais Rápida Possível)")
-                estilos_medley = ["50m Costas", "50m Peito", "50m Borboleta", "50m Livre"]
-                
-                melhor_tempo_medley = float('inf')
-                melhor_combinacao = None
-                
-                # Testa todas as 24 permutações de nado possíveis entre os 4 nadadores escolhidos
-                for perm in itertools.permutations(atletas_escolhidos):
-                    t_costas, _ = obter_pr_revezamento(df_historico, perm[0], "50m Costas")
-                    t_peito, _ = obter_pr_revezamento(df_historico, perm[1], "50m Peito")
-                    t_borb, _ = obter_pr_revezamento(df_historico, perm[2], "50m Borboleta")
-                    t_livre, _ = obter_pr_revezamento(df_historico, perm[3], "50m Livre")
-                    
-                    soma_perm = t_costas + t_peito + t_borb + t_livre
-                    if soma_perm < melhor_tempo_medley:
-                        melhor_tempo_medley = soma_perm
-                        melhor_combinacao = perm
-                
-                if melhor_tempo_medley != float('inf'):
-                    linhas_medley = []
-                    for i, estilo_nome in enumerate(estilos_medley):
-                        _, t_str = obter_pr_revezamento(df_historico, melhor_combinacao[i], estilo_nome)
-                        linhas_medley.append({"Ordem": f"{i+1}º Nadador", "Atleta": melhor_combinacao[i], "Estilo": estilo_nome.split()[-1], "Tempo Estimado": t_str})
-                    st.table(pd.DataFrame(linhas_medley))
-                    st.subheader(f"⏱️ Tempo Mínimo Otimizado do Revezamento Medley: {segundos_para_tempo(melhor_tempo_medley)}")
-                else:
-                    st.error("Não foi possível calcular. Um ou mais atletas selecionados não possuem tempos cadastrados em estilos de Medley.")
+        if tipo_rev == "4x50m Livre":
+            tempo_total_seg = 0.0
+            linhas_sim = []
+            for a in atletas_escolhidos:
+                seg, t_str = obter_pr_revezamento(df_historico, a, "Livre")
+                tempo_total_seg += seg if seg != float('inf') else 35.0
+                linhas_sim.append({"Atleta": a, "Estilo": "50m Livre", "PR Individual": t_str})
+            st.table(pd.DataFrame(linhas_sim))
+            st.subheader(f"⏱️ Tempo Total Estimado: {segundos_para_tempo(tempo_total_seg)}")
         else:
-            st.info("Por favor, selecione exatamente 4 atletas para ativar a simulação de tempos.")
+            estilos_m = ["Costas", "Peito", "Borboleta", "Livre"]
+            mejor_t = float('inf')
+            mejor_comb = None
+            for perm in itertools.permutations(atletas_escolhidos):
+                t_cos, _ = obter_pr_revezamento(df_historico, perm[0], "Costas")
+                t_pei, _ = obter_pr_revezamento(df_historico, perm[1], "Peito")
+                t_bor, _ = obter_pr_revezamento(df_historico, perm[2], "Borboleta")
+                t_liv, _ = obter_pr_revezamento(df_historico, perm[3], "Livre")
+                soma = t_cos + t_pei + t_bor + t_liv
+                if soma < mejor_t:
+                    mejor_t = soma
+                    mejor_comb = perm
+            if mejor_t != float('inf'):
+                linhas_m = []
+                for i, est_n in enumerate(estilos_m):
+                    _, t_str = obter_pr_revezamento(df_historico, mejor_comb[i], est_n)
+                    linhas_m.append({"Ordem": f"{i+1}º Nadador", "Atleta": mejor_comb[i], "Estilo (50m)": est_n, "Tempo Estimado": t_str})
+                st.table(pd.DataFrame(linhas_m))
+                st.subheader(f"⏱️ Tempo Otimizado Medley: {segundos_para_tempo(mejor_t)}")
 
 with aba3:
-    st.subheader("Entrada de Dados e Atualização do Sistema")
-    col_pdf, col_manual = st.columns(2)
-    
-    with col_pdf:
-        st.markdown("### 📤 Upload de Relatórios PDF")
-        uploaded_file = st.file_uploader("Arraste o PDF oficial da competição aqui:", type=["pdf"])
+    st.subheader("Entrada de Dados e Atualização do Painel")
+    c_pdf, col_manual = st.columns(2)
+    with c_pdf:
+        st.markdown("### 📤 Upload de Relatórios oficiais (PDF)")
+        uploaded_file = st.file_uploader("Arraste o PDF aqui:", type=["pdf"])
         if uploaded_file is not None:
-            if st.button("Processar e Fundir PDF"):
-                with st.spinner("Extraindo e Higienizando registros..."):
-                    df_novos = processar_pdf(uploaded_file)
-                    if not df_novos.empty:
-                        df_total = pd.concat([df_historico, df_novos]).drop_duplicates(subset=["Data", "Prova", "Atleta", "Tempo"])
-                        df_total.to_csv(CSV_FILE, index=False)
-                        st.success(f"Sucesso! {len(df_novos)} novos tempos unificados na base!")
-                        st.rerun()
-                    else:
-                        st.warning("Nenhum atleta de Vinhedo localizado neste documento.")
-                        
+            if st.button("Processar e Fundir Dados"):
+                df_novos = processar_pdf(uploaded_file)
+                if not df_novos.empty:
+                    df_total = pd.concat([df_historico, df_novos]).drop_duplicates(subset=["Data", "Prova", "Atleta", "Tempo"])
+                    df_total.to_csv(CSV_FILE, index=False)
+                    st.success(f"Sucesso! {len(df_novos)} novos tempos unificados na base!")
+                    st.rerun()
+                else:
+                    st.warning("Nenhum atleta mapeado encontrado nesse arquivo.")
     with col_manual:
         st.markdown("### ✍️ Lançamento Manual (Treinos / Cronometragem de Borda)")
         lista_atletas_v = sorted(list(IDADES_BASE_ATLETAS.keys()))
         atleta_m = st.selectbox("Selecione o Atleta:", lista_atletas_v)
         prova_m = st.selectbox("Estilo/Distância da Prova:", [
-            "50m Livre Masc", "50m Livre Fem", "50m Peito Masc", "50m Peito Fem",
-            "50m Costas Masc", "50m Costas Fem", "50m Borboleta Masc", "50m Borboleta Fem",
-            "100m Livre Masc", "100m Livre Fem", "100m Peito Masc", "100m Peito Fem",
-            "100m Costas Masc", "100m Costas Fem", "100m Borboleta Masc", "100m Borboleta Fem",
-            "100m Medley Masc", "100m Medley Fem", "200m Livre Masc", "200m Livre Fem",
-            "400m Livre Masc", "400m Livre Fem"
+            "50m Livre", "50m Peito", "50m Costas", "50m Borboleta",
+            "100m Livre", "100m Peito", "100m Costas", "100m Borboleta", "100m Medley",
+            "200m Livre", "200m Costas", "400m Livre"
         ])
         data_m = st.date_input("Data da Coleta:")
         local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo")
