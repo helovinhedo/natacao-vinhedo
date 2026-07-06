@@ -35,7 +35,7 @@ ANOS_NASCIMENTO = {
     "LARISSA LIMA SOATO": 2001
 }
 
-# Género dos atletas para o simulador de revezamento
+# Gênero dos atletas para o simulador de revezamento
 GENERO_ATLETAS = {
     "CLAUDIA COLAMARINO": "F", "BRUNA LIMA VICENTE": "F", "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": "M",
     "RAFAEL HIROSHI BRAZ DA SILVA": "M", "HELOÍSA DE SOUSA EVANGELISTA": "F", "TALITA CLIOGIA BARBOSA": "F",
@@ -139,9 +139,9 @@ def processar_pdf(pdf_file):
     reader = PdfReader(pdf_file)
     linhas_encontradas = []
     
-    data_prova = "Disponível no PDF"
-    campeonato_nome = "Competição Não Identificada"
-    local_nome = "Local Não Identificado"
+    data_prova = ""
+    campeonato_nome = ""
+    local_nome = ""
     prova_atual = "Não identificada"
     faixa_atual = "Master"
     
@@ -151,23 +151,35 @@ def processar_pdf(pdf_file):
         
     linhas = texto_completo.split("\n")
     
-    # Captura inteligente do Cabeçalho ABMN
-    for l in linhas[:40]:
+    # 1. CAPTURA DE CABEÇALHO CEGA (Apenas as primeiras 20 linhas do documento inteiro)
+    for l in linhas[:20]:
         l_up = l.upper().strip()
-        if campeonato_nome == "Competição Não Identificada" and any(k in l_up for k in ["CAMPEONATO", "COPA", "TROFÉU", "TORNEIO"]):
+        
+        # Pega o nome do campeonato
+        if not campeonato_nome and any(k in l_up for k in ["CAMPEONATO", "COPA", "TROFÉU", "TORNEIO", "FESTIVAL"]):
             if "ABMN" not in l_up and "RESULTADOS" not in l_up:
                 campeonato_nome = l.replace("'", "").strip()
-                
-        if local_nome == "Local Não Identificado" and "-" in l_up and "METROS" not in l_up and "PROVA" not in l_up and " /" not in l_up:
-            # Tenta encontrar o nome do local que costuma ter um traço (ex: COMPLEXO ESPORTIVO - SANTO ANDRE)
-            local_nome = l.replace("'", "").strip()
-            
+        
+        # Pega a data (qualquer formato dd/mm/aaaa)
         match_d = re.search(r'(\d{2}/\d{2}/\d{4})', l)
-        if match_d:
+        if match_d and not data_prova:
             data_prova = match_d.group(1)
+            
+        # Pega o local filtrando coisas óbvias (como hifens de faixas etárias)
+        if not local_nome and "-" in l_up and "/" in l_up and "METROS" not in l_up and "RAIAS" not in l_up:
+            if any(x in l_up for x in ["COMPLEXO", "CLUBE", "CENTRO", "SP", "RJ", "MG", "PR", "ASSOCIA"]):
+                local_nome = l.replace("'", "").strip()
 
-    local_etapa_final = f"{campeonato_nome} - {local_nome}" if campeonato_nome != "Competição Não Identificada" else local_nome
+    # Fallbacks se o cabeçalho for muito louco
+    campeonato_nome = campeonato_nome if campeonato_nome else "Competição Não Identificada"
+    data_prova = data_prova if data_prova else "Data Não Identificada"
+    
+    if campeonato_nome != "Competição Não Identificada" and local_nome:
+        local_etapa_final = f"{campeonato_nome} - {local_nome}"
+    else:
+        local_etapa_final = campeonato_nome
 
+    # 2. VARREDURA DE ATLETAS E TEMPOS
     for idx, linha in enumerate(linhas):
         linha_upper = linha.upper().strip()
         
@@ -183,15 +195,15 @@ def processar_pdf(pdf_file):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
             
-        # Captura da Categoria contornando quebras de linha
+        # Captura da Categoria (Faixa Etária)
         if "FAIXA:" in linha_upper:
             for j in range(0, 4):
                 if idx + j < len(linhas):
                     busca_faixa = linhas[idx+j].upper().strip()
                     if "+" in busca_faixa or "MASTER" in busca_faixa:
-                        faixa_atual = busca_faixa.replace("FAIXA:", "").replace('"', '').replace(',', '').strip()
-                        # Limpa "PRÉ- MASTER" para "PRÉ-MASTER"
-                        faixa_atual = faixa_atual.replace("PRÉ- ", "PRÉ-")
+                        faixa_limpa = busca_faixa.replace("FAIXA:", "").replace('"', '').replace(',', '').strip()
+                        faixa_atual = re.sub(r'-+', '', faixa_limpa).strip() # Limpa traços extras
+                        faixa_atual = faixa_atual.replace("PRÉ- MASTER", "PRÉ-MASTER")
                         break
             
         # Captura do Atleta e Tempo
@@ -289,7 +301,7 @@ with aba1:
 
 with aba2:
     st.title("🚀 Inteligência Estratégica: Top Revezamentos")
-    st.markdown("Neste simulador, o sistema calcula as combinações filtrando pelo género correto e otimizando pela categoria de idade real.")
+    st.markdown("Neste simulador, o sistema calcula as combinações filtrando pelo gênero correto e otimizando pela categoria de idade real.")
     
     lista_completa = sorted(list(ANOS_NASCIMENTO.keys()))
     atletas_pool = st.multiselect("Selecione a base de atletas para simular (Padrão: Todos):", lista_completa, default=lista_completa)
@@ -298,10 +310,10 @@ with aba2:
     with col_rev1:
         tipo_rev = st.radio("Estilo do Revezamento:", ["4x50m Livre", "4x50m Medley"], horizontal=True)
     with col_rev2:
-        genero_rev = st.radio("Categoria de Género:", ["Feminino", "Masculino", "Misto"], horizontal=True)
+        genero_rev = st.radio("Categoria de Gênero:", ["Feminino", "Masculino", "Misto"], horizontal=True)
     
     if st.button("Gerar Melhores Combinações"):
-        # Filtro Matemático de Género
+        # Filtro Matemático de Gênero
         homens = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'M']
         mulheres = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'F']
         
@@ -364,7 +376,7 @@ with aba2:
                     df_cat = df_res[df_res["Categoria"] == cat].sort_values("Tempo Total (Seg)").head(3)
                     st.table(df_cat[["Tempo Estimado", "Soma Idades", "Equipe"]])
             else:
-                st.warning("Não há tempos válidos registados para formar combinações completas com estes atletas neste estilo.")
+                st.warning("Não há tempos válidos registrados para formar combinações completas com estes atletas neste estilo.")
 
 with aba3:
     st.subheader("Entrada de Dados e Atualização do Painel")
@@ -382,7 +394,7 @@ with aba3:
                     st.success(f"Sucesso! {len(df_novos)} novos tempos unificados na base!")
                     st.rerun()
                 else:
-                    st.warning("Nenhum atleta mapeado foi encontrado neste ficheiro.")
+                    st.warning("Nenhum atleta mapeado foi encontrado neste arquivo.")
     with col_manual:
         st.markdown("### ✍️ Lançamento Manual (Treinos / Borda)")
         lista_atletas_v = sorted(list(ANOS_NASCIMENTO.keys()))
@@ -392,10 +404,10 @@ with aba3:
             "100m Livre", "100m Peito", "100m Costas", "100m Borboleta", "100m Medley",
             "200m Livre", "200m Costas", "400m Livre"
         ])
-        gen_m = st.selectbox("Género da Prova:", ["Fem", "Masc", "Misto"])
+        gen_m = st.selectbox("Gênero da Prova:", ["Fem", "Masc", "Misto"])
         data_m = st.date_input("Data da Coleta:")
         local_m = st.text_input("Etapa/Descrição do Local:", value="Treino SEL Vinhedo")
-        tempo_m = st.text_input("Tempo Registado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC")
+        tempo_m = st.text_input("Tempo Registrado (ex: 28.54 ou 1:04.25):", placeholder="MM:SS.CC ou SS.CC")
         
         if st.button("Gravar Tempo Manual"):
             if tempo_m and data_m:
