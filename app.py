@@ -149,13 +149,13 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
         
     linhas = texto_completo.split("\n")
 
-    for idx, linha in enumerate(linhas):
-        linha_upper = linha.upper().strip()
+    for idx, inline_linha in enumerate(linhas):
+        linha_upper = inline_linha.upper().strip()
         
         if "PROVA" in linha_upper and "METROS" in linha_upper:
-            prova_atual = normalizar_prova(linha)
+            prova_atual = normalizar_prova(inline_linha)
         elif re.match(r'^PROVA\s+\d+', linha_upper):
-            partes_p = [linha]
+            partes_p = [inline_linha]
             for j in range(1, 4):
                 if idx + j < len(linhas):
                     next_l = linhas[idx+j].strip()
@@ -174,7 +174,7 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
                         break
             
         if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
-            linha_limpa = linha.replace('"', '').replace(';', ' ').strip()
+            linha_limpa = inline_linha.replace('"', '').replace(';', ' ').strip()
             atleta_final = normalizar_nome_atleta(linha_limpa)
             
             if atleta_final == "Atleta Desconhecido": continue
@@ -211,8 +211,8 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
         
     linhas = texto_completo.split("\n")
 
-    for idx, linha in enumerate(linhas):
-        linha_upper = linha.upper().strip()
+    for idx, inline_linha in enumerate(linhas):
+        linha_upper = inline_linha.upper().strip()
         
         if re.match(r'^PROVA\s*\d*', linha_upper):
             bloco_prova = linha_upper
@@ -228,7 +228,7 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
                     categoria_atual = match_cat.group(1)
             
         if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
-            linha_limpa = linha.replace('"', '').replace(';', ' ').strip()
+            linha_limpa = inline_linha.replace('"', '').replace(';', ' ').strip()
             atleta_final = normalizar_nome_atleta(linha_limpa)
             
             if atleta_final == "Atleta Desconhecido": continue
@@ -256,37 +256,42 @@ def processar_pdf(pdf_file, tipo_relatorio, nome_evento_manual, data_evento_manu
         return processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual)
 
 # ==========================================
-# --- ENGINE INTERFACE (STREAMLIT) BLINDADA ---
+# --- ENGINE INTERFACE (STREAMLIT) INTELIGENTE ---
 # ==========================================
 CSV_FILE = "historico_vinhedo.csv"
 colunas_padrao = ["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"]
 
-try:
-    # 1. Tenta ler o arquivo original
-    df_historico = pd.read_csv(CSV_FILE)
-    
-    # 2. O ESCUDO: Remove colunas duplicadas geradas acidentalmente pelo editor do GitHub
-    df_historico = df_historico.loc[:, ~df_historico.columns.duplicated()].copy()
-    
-    # 3. Remove linhas que estejam totalmente em branco
-    df_historico = df_historico.dropna(how="all")
-    
-    # 4. Verifica se o cabeçalho base continua existindo
-    if "Atleta" not in df_historico.columns:
+if os.path.exists(CSV_FILE):
+    try:
+        # SUPER MOTOR DE LEITURA ADAPTATIVA:
+        # Tenta ler com Vírgula + UTF-8 (Padrão)
+        df_historico = pd.read_csv(CSV_FILE, encoding="utf-8")
+        if "Atleta" not in df_historico.columns:
+            # Tenta com Ponto e Vírgula + UTF-8
+            df_historico = pd.read_csv(CSV_FILE, sep=";", encoding="utf-8")
+            
+    except Exception:
+        try:
+            # Tenta ler no padrão do Excel Brasileiro (Ponto e Vírgula + Latin-1)
+            df_historico = pd.read_csv(CSV_FILE, sep=";", encoding="latin1")
+        except Exception:
+            df_historico = pd.DataFrame(columns=colunas_padrao)
+            
+    # Remove colunas duplicadas que surgiram por edições manuais
+    if "Atleta" in df_historico.columns:
+        df_historico = df_historico.loc[:, ~df_historico.columns.duplicated()].copy()
+        df_historico = df_historico.dropna(how="all")
+    else:
         df_historico = pd.DataFrame(columns=colunas_padrao)
-        
-except Exception:
-    # Se o CSV estiver impossível de ler, cria uma base limpa em branco e segue a vida
+else:
     df_historico = pd.DataFrame(columns=colunas_padrao)
 
-# Aplica as regras apenas se tiver dados reais
+# Aplica as limpezas se a base contiver linhas válidas
 if not df_historico.empty:
     df_historico["Atleta"] = df_historico["Atleta"].apply(normalizar_nome_atleta)
     df_historico["Prova"] = df_historico["Prova"].apply(normalizar_prova)
     df_historico["Tempo"] = df_historico["Tempo"].apply(padronizar_tempo_string)
     df_historico = df_historico[df_historico["Atleta"] != "Atleta Desconhecido"]
-else:
-    df_historico = pd.DataFrame(columns=colunas_padrao)
 
 # Criação das Abas
 aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
@@ -295,7 +300,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "🏊‍♂️ Simulador Revezamento", 
     "📤 Alimentar Base", 
     "📊 Estatísticas", 
-    "🗄️ Backup"
+    "🗄️ Gerenciamento e Backup"
 ])
 
 # ------------------------------------------
@@ -578,15 +583,15 @@ with aba5:
         st.info("Estatísticas não disponíveis (Base Vazia).")
 
 # ------------------------------------------
-# ABA 6: BACKUP E DADOS BRUTOS
+# ABA 6: GERENCIAMENTO E BACKUP
 # ------------------------------------------
 with aba6:
-    st.subheader("🗄️ Gerenciamento da Base de Dados (CSV)")
+    st.subheader("🗄️ Painel de Controle Administrativo do CSV")
     
     col_download, col_upload = st.columns(2)
     with col_download:
         st.markdown("### 📥 Salvar Backup")
-        st.markdown("Faça o download da base atual antes de atualizar o código no GitHub.")
+        st.markdown("Faça o download da base atual em formato CSV para o seu computador.")
         if not df_historico.empty:
             csv_export = df_historico.to_csv(index=False).encode('utf-8')
             st.download_button(
@@ -594,14 +599,14 @@ with aba6:
                 data=csv_export,
                 file_name='historico_vinhedo.csv',
                 mime='text/csv',
-                type="primary"
+                type="secondary"
             )
         else:
             st.info("A base está vazia. Nada para baixar.")
             
     with col_upload:
         st.markdown("### 🔄 Restaurar Backup")
-        st.markdown("Se o servidor resetou, faça o upload do seu CSV salvo aqui para restaurar a base.")
+        st.markdown("Suba o arquivo CSV de backup aqui para substituir a base atual.")
         backup_file = st.file_uploader("Envie o backup (CSV):", type=["csv"])
         if backup_file is not None:
             if st.button("Restaurar Base de Dados"):
