@@ -26,7 +26,7 @@ DIC_ATLETAS = {
 
 ANO_ATUAL = 2026
 ANOS_NASCIMENTO = {
-    "CLAUDIA COLAMARINO": 1969, "BRUNA LIMA VICENTE": 1988, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
+    "CLAUDIA COLAMARINO": 1971, "BRUNA LIMA VICENTE": 1988, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
     "RAFAEL HIROSHI BRAZ DA SILVA": 1991, "HELOÍSA DE SOUSA EVANGELISTA": 1991, "TALITA CLIOGIA BARBOSA": 1996,
     "CALEBE RAMOS RIBEIRO": 1991, "RAFAEL MELLO": 1991, "ANA REGINA OLIVAN LIMONGI": 1986,
     "LARA FERREIRA DE SOUZA TONIN": 1991, "FABIUS LUIZ PALARO": 1976, "HELENA KIYOKA KOBAYASHI NABEIRO": 1981,
@@ -199,7 +199,6 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
             
     return pd.DataFrame(linhas_encontradas)
 
-
 def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
     reader = PdfReader(pdf_file)
     linhas_encontradas = []
@@ -250,7 +249,6 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             
     return pd.DataFrame(linhas_encontradas)
 
-
 def processar_pdf(pdf_file, tipo_relatorio, nome_evento_manual, data_evento_manual):
     if tipo_relatorio == "UNAMI":
         return processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual)
@@ -258,20 +256,37 @@ def processar_pdf(pdf_file, tipo_relatorio, nome_evento_manual, data_evento_manu
         return processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual)
 
 # ==========================================
-# --- ENGINE INTERFACE (STREAMLIT) ---
+# --- ENGINE INTERFACE (STREAMLIT) BLINDADA ---
 # ==========================================
 CSV_FILE = "historico_vinhedo.csv"
+colunas_padrao = ["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"]
 
-if os.path.exists(CSV_FILE):
+try:
+    # 1. Tenta ler o arquivo original
     df_historico = pd.read_csv(CSV_FILE)
-else:
-    df_historico = pd.DataFrame(columns=["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"])
+    
+    # 2. O ESCUDO: Remove colunas duplicadas geradas acidentalmente pelo editor do GitHub
+    df_historico = df_historico.loc[:, ~df_historico.columns.duplicated()].copy()
+    
+    # 3. Remove linhas que estejam totalmente em branco
+    df_historico = df_historico.dropna(how="all")
+    
+    # 4. Verifica se o cabeçalho base continua existindo
+    if "Atleta" not in df_historico.columns:
+        df_historico = pd.DataFrame(columns=colunas_padrao)
+        
+except Exception:
+    # Se o CSV estiver impossível de ler, cria uma base limpa em branco e segue a vida
+    df_historico = pd.DataFrame(columns=colunas_padrao)
 
+# Aplica as regras apenas se tiver dados reais
 if not df_historico.empty:
     df_historico["Atleta"] = df_historico["Atleta"].apply(normalizar_nome_atleta)
     df_historico["Prova"] = df_historico["Prova"].apply(normalizar_prova)
     df_historico["Tempo"] = df_historico["Tempo"].apply(padronizar_tempo_string)
     df_historico = df_historico[df_historico["Atleta"] != "Atleta Desconhecido"]
+else:
+    df_historico = pd.DataFrame(columns=colunas_padrao)
 
 # Criação das Abas
 aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
@@ -364,9 +379,6 @@ with aba2:
 # ------------------------------------------
 # ABA 3: SIMULADOR DE REVEZAMENTO
 # ------------------------------------------
-# ------------------------------------------
-# ABA 3: SIMULADOR DE REVEZAMENTO
-# ------------------------------------------
 with aba3:
     st.title("🚀 Inteligência Estratégica: Top Revezamentos")
     st.markdown("Selecione os atletas. Se alguém estiver sem tempo (S/T), dê dois cliques na tabela abaixo e digite o tempo manualmente (ex: 28.50) antes de simular!")
@@ -391,11 +403,14 @@ with aba3:
         df_tempos_base["Borboleta"] = [obter_pr_revezamento(df_historico, a, "Borboleta")[1] for a in atletas_pool]
         df_tempos_base["Livre"] = [obter_pr_revezamento(df_historico, a, "Livre")[1] for a in atletas_pool]
 
-    # Cria o editor interativo (Bloqueando a edição da coluna Atleta para não quebrar a busca)
     df_editado = st.data_editor(df_tempos_base, use_container_width=True, hide_index=True, disabled=["Atleta"])
+    
+    def extrair_string(valor):
+        if isinstance(valor, (list, tuple, set, pd.Series)):
+            return str(valor[0])
+        return str(valor)
 
     if st.button("Gerar Melhores Combinações"):
-        # O PULO DO GATO: Converte a tabela para um dicionário blindado contra IndexErrors
         dict_tempos = df_editado.set_index("Atleta").to_dict(orient="index")
         
         homens = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'M']
@@ -419,27 +434,28 @@ with aba3:
             if tipo_rev == "4x50m Livre":
                 for combo in combinacoes_validas:
                     tempos = []
-                    for a in combo:
-                        # Busca o tempo de forma segura via dicionário
+                    combo_limpo = [extrair_string(a) for a in combo] 
+                    
+                    for a in combo_limpo:
                         t_str = dict_tempos.get(a, {}).get("Livre", "S/T")
                         t_sec = tempo_para_segundos(t_str)
                         tempos.append(t_sec if t_sec else float('inf'))
                         
                     if float('inf') not in tempos:
-                        idade_total = sum(calcular_idade(a) for a in combo)
+                        idade_total = sum(calcular_idade(a) for a in combo_limpo)
                         cat = obter_categoria_revezamento(idade_total)
                         resultados.append({
-                            "Equipe": " / ".join(combo), "Categoria": cat,
+                            "Equipe": " / ".join(combo_limpo), "Categoria": cat,
                             "Soma Idades": idade_total, "Tempo Total (Seg)": sum(tempos),
                             "Tempo Estimado": segundos_para_tempo(sum(tempos))
                         })
             else:
                 for combo in combinacoes_validas:
+                    combo_limpo = [extrair_string(a) for a in combo] 
                     melhor_t = float('inf')
                     melhor_ordem = None
                     
-                    for perm in itertools.permutations(combo):
-                        # Busca os tempos de forma segura via dicionário para o Medley
+                    for perm in itertools.permutations(combo_limpo):
                         t_cos_str = dict_tempos.get(perm[0], {}).get("Costas", "S/T")
                         t_pei_str = dict_tempos.get(perm[1], {}).get("Peito", "S/T")
                         t_bor_str = dict_tempos.get(perm[2], {}).get("Borboleta", "S/T")
@@ -456,7 +472,7 @@ with aba3:
                             melhor_ordem = perm
                             
                     if melhor_t != float('inf'):
-                        idade_total = sum(calcular_idade(a) for a in combo)
+                        idade_total = sum(calcular_idade(a) for a in combo_limpo)
                         cat = obter_categoria_revezamento(idade_total)
                         resultados.append({
                             "Equipe": f"Costas: {melhor_ordem[0]} / Peito: {melhor_ordem[1]} / Borboleta: {melhor_ordem[2]} / Livre: {melhor_ordem[3]}", 
