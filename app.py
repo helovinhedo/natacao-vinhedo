@@ -26,7 +26,7 @@ DIC_ATLETAS = {
 
 ANO_ATUAL = 2026
 ANOS_NASCIMENTO = {
-    "CLAUDIA COLAMARINO": 1971, "BRUNA LIMA VICENTE": 1991, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
+    "CLAUDIA COLAMARINO": 1971, "BRUNA LIMA VICENTE": 1988, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
     "RAFAEL HIROSHI BRAZ DA SILVA": 1991, "HELOÍSA DE SOUSA EVANGELISTA": 1991, "TALITA CLIOGIA BARBOSA": 1996,
     "CALEBE RAMOS RIBEIRO": 1991, "RAFAEL MELLO": 1991, "ANA REGINA OLIVAN LIMONGI": 1986,
     "LARA FERREIRA DE SOUZA TONIN": 1991, "FABIUS LUIZ PALARO": 1976, "HELENA KIYOKA KOBAYASHI NABEIRO": 1981,
@@ -364,6 +364,9 @@ with aba2:
 # ------------------------------------------
 # ABA 3: SIMULADOR DE REVEZAMENTO
 # ------------------------------------------
+# ------------------------------------------
+# ABA 3: SIMULADOR DE REVEZAMENTO
+# ------------------------------------------
 with aba3:
     st.title("🚀 Inteligência Estratégica: Top Revezamentos")
     st.markdown("Selecione os atletas. Se alguém estiver sem tempo (S/T), dê dois cliques na tabela abaixo e digite o tempo manualmente (ex: 28.50) antes de simular!")
@@ -391,6 +394,12 @@ with aba3:
     # Cria o editor interativo
     df_editado = st.data_editor(df_tempos_base, use_container_width=True, hide_index=True)
     
+    # --- FUNÇÃO DE BLINDAGEM CONTRA LISTAS ESCONDIDAS ---
+    def extrair_string(valor):
+        if isinstance(valor, (list, tuple, set, pd.Series)):
+            return str(valor[0])
+        return str(valor)
+
     if st.button("Gerar Melhores Combinações"):
         homens = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'M']
         mulheres = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'F']
@@ -413,25 +422,30 @@ with aba3:
             if tipo_rev == "4x50m Livre":
                 for combo in combinacoes_validas:
                     tempos = []
-                    for a in combo:
+                    # Limpa a combinação antes de processar
+                    combo_limpo = [extrair_string(a) for a in combo] 
+                    
+                    for a in combo_limpo:
                         t_str = df_editado.loc[df_editado["Atleta"] == a, "Livre"].values[0]
                         t_sec = tempo_para_segundos(t_str)
                         tempos.append(t_sec if t_sec else float('inf'))
                         
                     if float('inf') not in tempos:
-                        idade_total = sum(calcular_idade(a) for a in combo)
+                        idade_total = sum(calcular_idade(a) for a in combo_limpo)
                         cat = obter_categoria_revezamento(idade_total)
                         resultados.append({
-                            "Equipe": " / ".join(combo), "Categoria": cat,
+                            "Equipe": " / ".join(combo_limpo), "Categoria": cat,
                             "Soma Idades": idade_total, "Tempo Total (Seg)": sum(tempos),
                             "Tempo Estimado": segundos_para_tempo(sum(tempos))
                         })
             else:
                 for combo in combinacoes_validas:
+                    # Limpa a combinação antes de processar
+                    combo_limpo = [extrair_string(a) for a in combo] 
                     melhor_t = float('inf')
                     melhor_ordem = None
-                    for perm in itertools.permutations(combo):
-                        # Pega os valores editados na tela
+                    
+                    for perm in itertools.permutations(combo_limpo):
                         t_cos_str = df_editado.loc[df_editado["Atleta"] == perm[0], "Costas"].values[0]
                         t_pei_str = df_editado.loc[df_editado["Atleta"] == perm[1], "Peito"].values[0]
                         t_bor_str = df_editado.loc[df_editado["Atleta"] == perm[2], "Borboleta"].values[0]
@@ -448,7 +462,7 @@ with aba3:
                             melhor_ordem = perm
                             
                     if melhor_t != float('inf'):
-                        idade_total = sum(calcular_idade(a) for a in combo)
+                        idade_total = sum(calcular_idade(a) for a in combo_limpo)
                         cat = obter_categoria_revezamento(idade_total)
                         resultados.append({
                             "Equipe": f"Costas: {melhor_ordem[0]} / Peito: {melhor_ordem[1]} / Borboleta: {melhor_ordem[2]} / Livre: {melhor_ordem[3]}", 
