@@ -234,8 +234,8 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             
             if atleta_final == "Atleta Desconhecido": continue
             
-            if any(w in linha_upper for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
-                tempo_final = "DQL" if any(w in linha_upper for w in ["DESCLA", "DQL"]) else "Ausente"
+            if any(w in inline_linha.upper() for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
+                tempo_final = "DQL" if any(w in inline_linha.upper() for w in ["DESCLA", "DQL"]) else "Ausente"
             else:
                 match_tempo = re.search(r'(?:\d{1,2}m)?\d{2}s\d{2}c?', inline_linha, re.IGNORECASE)
                 if match_tempo:
@@ -293,20 +293,29 @@ if not df_historico.empty:
     df_historico["Tempo"] = df_historico["Tempo"].apply(padronizar_tempo_string)
     df_historico = df_historico[df_historico["Atleta"] != "Atleta Desconhecido"]
 
-# Nova Ordem das Abas solicitada por você
-aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
-    "👤 Visão Atleta", 
-    "⏱️ Visão Treinador", 
-    "📊 Estatísticas",
-    "🏊‍♂️ Simulador Revezamento", 
-    "📤 Alimentar Base", 
-    "🗄️ Gerenciamento e Backup"
-])
+# ==========================================
+# --- MENU LATERAL DE NAVEGAÇÃO ---
+# ==========================================
+with st.sidebar:
+    st.markdown("## 🏊‍♂️ Natação Master")
+    st.markdown("---")
+    tela_selecionada = st.radio(
+        "Selecione o Painel:",
+        [
+            "👤 Visão Atleta", 
+            "⏱️ Visão Treinador", 
+            "📊 Estatísticas",
+            "🚀 Simulador Revezamento", 
+            "📤 Alimentar Base", 
+            "🗄️ Gerenciamento e Backup"
+        ]
+    )
+    st.markdown("---")
 
 # ------------------------------------------
-# ABA 1: VISÃO ATLETA
+# TELA 1: VISÃO ATLETA
 # ------------------------------------------
-with aba1:
+if tela_selecionada == "👤 Visão Atleta":
     st.title("Ficha de Rendimento Individual")
     if not df_historico.empty:
         lista_atletas = sorted(df_historico["Atleta"].unique())
@@ -341,7 +350,7 @@ with aba1:
         st.markdown("---")
         st.markdown("#### 📈 Gráfico de Evolução (Segundos)")
         if not df_validos.empty:
-            df_grafico = df_validos.dropna(subset=["Data_Dt"]).sort_values("Data_Dt")
+            df_grafico = df_validos.dropna(subset["Data_Dt"]).sort_values("Data_Dt")
             provas_disp = df_grafico["Prova"].unique()
             abas_graficos = st.tabs(list(provas_disp))
             
@@ -354,9 +363,9 @@ with aba1:
         st.info("O arquivo CSV histórico está vazio ou não foi encontrado.")
 
 # ------------------------------------------
-# ABA 2: VISÃO TREINADOR
+# TELA 2: VISÃO TREINADOR
 # ------------------------------------------
-with aba2:
+elif tela_selecionada == "⏱️ Visão Treinador":
     st.title("Ranking da Equipe por Prova")
     if not df_historico.empty:
         lista_provas = sorted(df_historico["Prova"].unique())
@@ -382,9 +391,9 @@ with aba2:
         st.info("A base está vazia.")
 
 # ------------------------------------------
-# ABA 3: ESTATÍSTICAS
+# TELA 3: ESTATÍSTICAS
 # ------------------------------------------
-with aba3:
+elif tela_selecionada == "📊 Estatísticas":
     st.title("📊 Raio-X da Equipe")
     
     if not df_historico.empty:
@@ -422,9 +431,9 @@ with aba3:
         st.info("Estatísticas não disponíveis (Base Vazia).")
 
 # ------------------------------------------
-# ABA 4: SIMULADOR DE REVEZAMENTO
+# TELA 4: SIMULADOR DE REVEZAMENTO
 # ------------------------------------------
-with aba4:
+elif tela_selecionada == "🚀 Simulador Revezamento":
     st.title("🚀 Inteligência Estratégica: Top Revezamentos")
     
     col_rev1, col_rev2 = st.columns(2)
@@ -542,9 +551,9 @@ with aba4:
         st.info("Selecione atletas para iniciar a montagem do revezamento.")
 
 # ------------------------------------------
-# ABA 5: ALIMENTAR BASE
+# TELA 5: ALIMENTAR BASE
 # ------------------------------------------
-with aba5:
+elif tela_selecionada == "📤 Alimentar Base":
     st.subheader("Entrada de Dados e Atualização do Painel")
     c_pdf, col_manual = st.columns(2)
     with c_pdf:
@@ -597,9 +606,9 @@ with aba5:
                 st.rerun()
 
 # ------------------------------------------
-# ABA 6: GERENCIAMENTO E BACKUP
+# TELA 6: GERENCIAMENTO E BACKUP
 # ------------------------------------------
-with aba6:
+elif tela_selecionada == "🗄️ Gerenciamento e Backup":
     st.subheader("🗄️ Painel de Controle Administrativo do CSV")
     
     col_download, col_upload = st.columns(2)
