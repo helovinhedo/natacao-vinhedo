@@ -22,17 +22,18 @@ DIC_ATLETAS = {
     "MURILO": "MURILO SANTOS", "LUCIANO": "LUCIANO DIAS GOBI",
     "MATIAS": "MATIAS KOLBE", "EDUARDO": "EDUARDO TREVISAN GONCALVES",
     "MARIANE": "MARIANE DE MORAES QUIRINO", "LARISSA": "LARISSA LIMA SOATO"
+    "WAGNER" : "WAGNER ALVES BONADIO"
 }
 
 ANO_ATUAL = 2026
 ANOS_NASCIMENTO = {
-    "CLAUDIA COLAMARINO": 1971, "BRUNA LIMA VICENTE": 1988, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1986,
-    "RAFAEL HIROSHI BRAZ DA SILVA": 1991, "HELOÍSA DE SOUSA EVANGELISTA": 1991, "TALITA CLIOGIA BARBOSA": 1996,
-    "CALEBE RAMOS RIBEIRO": 1991, "RAFAEL MELLO": 1991, "ANA REGINA OLIVAN LIMONGI": 1986,
-    "LARA FERREIRA DE SOUZA TONIN": 1991, "FABIUS LUIZ PALARO": 1976, "HELENA KIYOKA KOBAYASHI NABEIRO": 1981,
-    "TIAGO BERNAL": 1981, "VOLKER PENK": 1971, "MURILO SANTOS": 2006, "LUCIANO DIAS GOBI": 1976,
-    "EDUARDO TREVISAN GONCALVES": 1981, "MATIAS KOLBE": 1986, "MARIANE DE MORAES QUIRINO": 1996,
-    "LARISSA LIMA SOATO": 2001
+    "CLAUDIA COLAMARINO": 1969, "BRUNA LIMA VICENTE": 1988, "ÁLVARO LOUZADA DE OLIVEIRA JUNIOR": 1982,
+    "RAFAEL HIROSHI BRAZ DA SILVA": 1987, "HELOÍSA DE SOUSA EVANGELISTA": 1989, "TALITA CLIOGIA BARBOSA": 1994,
+    "CALEBE RAMOS RIBEIRO": 1987, "RAFAEL MELLO": 1988, "ANA REGINA OLIVAN LIMONGI": 1984,
+    "LARA FERREIRA DE SOUZA TONIN": 1987, "FABIUS LUIZ PALARO": 1975, "HELENA KIYOKA KOBAYASHI NABEIRO": 1976,
+    "TIAGO BERNAL": 1979, "VOLKER PENK": 1967, "MURILO SANTOS": 2004, "LUCIANO DIAS GOBI": 1973,
+    "EDUARDO TREVISAN GONCALVES": 1976, "MATIAS KOLBE": 1981, "MARIANE DE MORAES QUIRINO": 1992,
+    "LARISSA LIMA SOATO": 2001, "WAGNER ALVES BONADIO": 1958
 }
 
 GENERO_ATLETAS = {
@@ -154,11 +155,11 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
         
         if "PROVA" in linha_upper and "METROS" in linha_upper:
             prova_atual = normalizar_prova(inline_linha)
-        elif re.match(r'^PROVA\s+\d+', linha_upper):
+        elif re.match(r'^PROVA\s+\d+', inline_linha):
             partes_p = [inline_linha]
             for j in range(1, 4):
                 if idx + j < len(linhas):
-                    next_l = lines[idx+j].strip()
+                    next_l = linhas[idx+j].strip()
                     if any(w in next_l.upper() for w in ["LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY", "FEMININO", "MASCULINO", "MISTO", "FEM", "MASC"]):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
@@ -173,7 +174,7 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
                         faixa_atual = faixa_atual.replace("PRÉ- MASTER", "PRÉ-MASTER")
                         break
             
-        if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
+        if "VINHEDO" in inline_linha.upper() or "VINHEDE" in inline_linha.upper():
             linha_limpa = inline_linha.replace('"', '').replace(';', ' ').strip()
             atleta_final = normalizar_nome_atleta(linha_limpa)
             
@@ -182,8 +183,8 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
             if any(w in linha_upper for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
                 tempo_final = "DQL" if ("DQL" in linha_upper or "DESCLA" in linha_upper) else "Ausente"
             else:
-                match_minutos = re.findall(r'\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b', linha_limpa, re.IGNORECASE)
-                match_segundos = re.findall(r'\b\d{2}[\.,]\d{2}\b', linha_limpa)
+                match_minutos = re.findall(r'\b\d{1,2}[m:]\d{2}[s\.]\d{2}c?\b', inline_linha, re.IGNORECASE)
+                match_segundos = re.findall(r'\b\d{2}[\.,]\d{2}\b', inline_linha)
                 tempo_final = "S/T"
                 
                 if match_minutos:
@@ -236,7 +237,7 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             if any(w in linha_upper for w in ["AUSENTE", "N/C", "Ñ NADOU", "DESCLA", "DQL"]):
                 tempo_final = "DQL" if any(w in linha_upper for w in ["DESCLA", "DQL"]) else "Ausente"
             else:
-                match_tempo = re.search(r'(?:\d{1,2}m)?\d{2}s\d{2}c?', linha_limpa, re.IGNORECASE)
+                match_tempo = re.search(r'(?:\d{1,2}m)?\d{2}s\d{2}c?', inline_linha, re.IGNORECASE)
                 if match_tempo:
                     tempo_final = padronizar_tempo_string(match_tempo.group(0))
                 else:
@@ -264,7 +265,6 @@ colunas_padrao = ["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"
 df_historico = None
 
 if os.path.exists(CSV_FILE):
-    # Testamos todas as combinações possíveis de separador e codificação
     combinacoes = [
         (",", "utf-8"),
         (";", "utf-8"),
@@ -275,35 +275,31 @@ if os.path.exists(CSV_FILE):
     for separador, codificacao in combinacoes:
         try:
             df_teste = pd.read_csv(CSV_FILE, sep=separador, encoding=codificacao)
-            # Se a coluna principal estiver no arquivo, encontramos a combinação certa!
             if "Atleta" in df_teste.columns:
                 df_historico = df_teste
                 break
         except Exception:
             continue
 
-# Se nenhuma combinação funcionou ou o arquivo não existe, cria um esqueleto vazio
 if df_historico is None:
     df_historico = pd.DataFrame(columns=colunas_padrao)
 else:
-    # Remove colunas duplicadas que surgiram por edições manuais
     df_historico = df_historico.loc[:, ~df_historico.columns.duplicated()].copy()
     df_historico = df_historico.dropna(how="all")
 
-# Aplica as limpezas se a base contiver linhas válidas
 if not df_historico.empty:
     df_historico["Atleta"] = df_historico["Atleta"].apply(normalizar_nome_atleta)
     df_historico["Prova"] = df_historico["Prova"].apply(normalizar_prova)
     df_historico["Tempo"] = df_historico["Tempo"].apply(padronizar_tempo_string)
     df_historico = df_historico[df_historico["Atleta"] != "Atleta Desconhecido"]
 
-# Criação das Abas
+# Nova Ordem das Abas solicitada por você
 aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "👤 Visão Atleta", 
     "⏱️ Visão Treinador", 
+    "📊 Estatísticas",
     "🏊‍♂️ Simulador Revezamento", 
     "📤 Alimentar Base", 
-    "📊 Estatísticas", 
     "🗄️ Gerenciamento e Backup"
 ])
 
@@ -364,7 +360,7 @@ with aba2:
     st.title("Ranking da Equipe por Prova")
     if not df_historico.empty:
         lista_provas = sorted(df_historico["Prova"].unique())
-        prova_sel = st.selectbox("Selecione a Prova para ver o Ranking interno:", lista_provas)
+        prova_sel = st.selectbox("Selecione a Prova para ver o Ranking interno:", lista_provas, key="treinador_prova_sel")
         
         df_prova_rank = df_historico[df_historico["Prova"] == prova_sel].copy()
         df_prova_rank["Segundos"] = df_prova_rank["Tempo"].apply(tempo_para_segundos)
@@ -386,129 +382,173 @@ with aba2:
         st.info("A base está vazia.")
 
 # ------------------------------------------
-# ABA 3: SIMULADOR DE REVEZAMENTO
+# ABA 3: ESTATÍSTICAS
 # ------------------------------------------
 with aba3:
-    st.title("🚀 Inteligência Estratégica: Top Revezamentos")
-    st.markdown("Selecione os atletas. Se alguém estiver sem tempo (S/T), dê dois cliques na tabela abaixo e digite o tempo manualmente (ex: 28.50) antes de simular!")
+    st.title("📊 Raio-X da Equipe")
     
-    lista_completa = sorted(list(ANOS_NASCIMENTO.keys()))
-    atletas_pool = st.multiselect("Selecione os atletas disponíveis:", lista_completa, default=lista_completa[:6])
+    if not df_historico.empty:
+        anos_disponiveis = ["Todos os Anos"] + sorted(list(set(pd.to_datetime(df_historico["Data"], format="%d/%m/%Y", errors="coerce").dt.year.dropna().astype(int).astype(str))), reverse=True)
+        ano_selecionado = st.selectbox("Selecione a Temporada para Análise:", anos_disponiveis, index=0, key="stats_ano_filter")
+        
+        if ano_selecionado == "Todos os Anos":
+            df_stats = df_historico
+            st.markdown("### 🌎 Métricas Globais (Histórico Acumulado)")
+        else:
+            df_stats = df_historico[pd.to_datetime(df_historico["Data"], format="%d/%m/%Y", errors="coerce").dt.year == int(ano_selecionado)]
+            st.markdown(f"### 📅 Métricas Consolidadas da Temporada {ano_selecionado}")
+            
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Atletas Ativos no Período", df_stats["Atleta"].nunique())
+        c2.metric("Total de Provas Nadadas", len(df_stats))
+        c3.metric("Total de Etapas/Competições", df_stats["Local/Etapa"].nunique())
+        
+        st.markdown("---")
+        
+        col_rank1, col_rank2 = st.columns(2)
+        with col_rank1:
+            st.markdown(f"#### 🏆 Atletas com Maior Volume de Provas ({ano_selecionado})")
+            assiduidade = df_stats["Atleta"].value_counts().reset_index()
+            assiduidade.columns = ["Atleta", "Nº de Provas Nadadas"]
+            st.dataframe(assiduidade.head(10), use_container_width=True, hide_index=True)
+            
+        with col_rank2:
+            st.markdown(f"#### 🏟️ Eventos com Maior Delegação de Vinhedo ({ano_selecionado})")
+            delegacao = df_stats.groupby("Local/Etapa")["Atleta"].nunique().reset_index()
+            delegacao.columns = ["Competição", "Atletas Presentes"]
+            delegacao = delegacao.sort_values("Atletas Presentes", ascending=False)
+            st.dataframe(delegacao, use_container_width=True, hide_index=True)
+    else:
+        st.info("Estatísticas não disponíveis (Base Vazia).")
+
+# ------------------------------------------
+# ABA 4: SIMULADOR DE REVEZAMENTO
+# ------------------------------------------
+with aba4:
+    st.title("🚀 Inteligência Estratégica: Top Revezamentos")
     
     col_rev1, col_rev2 = st.columns(2)
     with col_rev1:
         tipo_rev = st.radio("Estilo do Revezamento:", ["4x50m Livre", "4x50m Medley"], horizontal=True)
     with col_rev2:
         genero_rev = st.radio("Categoria de Gênero:", ["Feminino", "Masculino", "Misto"], horizontal=True)
+        
+    lista_completa = sorted(list(ANOS_NASCIMENTO.keys()))
+    if genero_rev == "Masculino":
+        lista_filtrada = [a for a in lista_completa if GENERO_ATLETAS.get(a) == 'M']
+    elif genero_rev == "Feminino":
+        lista_filtrada = [a for a in lista_completa if GENERO_ATLETAS.get(a) == 'F']
+    else:
+        lista_filtrada = lista_completa
+        
+    atletas_pool = st.multiselect("Selecione os atletas disponíveis para compor:", lista_filtrada, default=lista_filtrada[:6] if len(lista_filtrada) >= 6 else lista_filtrada)
     
     st.markdown("#### ✍️ Ajuste Manual de Tempos (Baseado nos PRs)")
-    df_tempos_base = pd.DataFrame({"Atleta": atletas_pool})
-    
-    if tipo_rev == "4x50m Livre":
-        df_tempos_base["Livre"] = [obter_pr_revezamento(df_historico, a, "Livre")[1] for a in atletas_pool]
-    else:
-        df_tempos_base["Costas"] = [obter_pr_revezamento(df_historico, a, "Costas")[1] for a in atletas_pool]
-        df_tempos_base["Peito"] = [obter_pr_revezamento(df_historico, a, "Peito")[1] for a in atletas_pool]
-        df_tempos_base["Borboleta"] = [obter_pr_revezamento(df_historico, a, "Borboleta")[1] for a in atletas_pool]
-        df_tempos_base["Livre"] = [obter_pr_revezamento(df_historico, a, "Livre")[1] for a in atletas_pool]
-
-    df_editado = st.data_editor(df_tempos_base, use_container_width=True, hide_index=True, disabled=["Atleta"])
-    
-    def extrair_string(valor):
-        if isinstance(valor, (list, tuple, set, pd.Series)):
-            return str(valor[0])
-        return str(valor)
-
-    if st.button("Gerar Melhores Combinações"):
-        dict_tempos = df_editado.set_index("Atleta").to_dict(orient="index")
+    if atletas_pool:
+        df_tempos_base = pd.DataFrame({"Atleta": atletas_pool})
         
-        homens = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'M']
-        mulheres = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'F']
-        
-        combinacoes_validas = []
-        if genero_rev == "Masculino":
-            combinacoes_validas = list(itertools.combinations(homens, 4))
-        elif genero_rev == "Feminino":
-            combinacoes_validas = list(itertools.combinations(mulheres, 4))
-        elif genero_rev == "Misto":
-            combos_m = list(itertools.combinations(homens, 2))
-            combos_f = list(itertools.combinations(mulheres, 2))
-            combinacoes_validas = [m + f for m in combos_m for f in combos_f]
-
-        if not combinacoes_validas:
-            st.error(f"Não foram selecionados atletas suficientes para formar um revezamento da categoria {genero_rev}.")
+        if tipo_rev == "4x50m Livre":
+            df_tempos_base["Livre"] = [obter_pr_revezamento(df_historico, a, "Livre")[1] for a in atletas_pool]
         else:
-            resultados = []
+            df_tempos_base["Costas"] = [obter_pr_revezamento(df_historico, a, "Costas")[1] for a in atletas_pool]
+            df_tempos_base["Peito"] = [obter_pr_revezamento(df_historico, a, "Peito")[1] for a in atletas_pool]
+            df_tempos_base["Borboleta"] = [obter_pr_revezamento(df_historico, a, "Borboleta")[1] for a in atletas_pool]
+            df_tempos_base["Livre"] = [obter_pr_revezamento(df_historico, a, "Livre")[1] for a in atletas_pool]
+
+        df_editado = st.data_editor(df_tempos_base, use_container_width=True, hide_index=True, disabled=["Atleta"], key="editor_rev_tempos")
+        
+        def extrair_string(valor):
+            if isinstance(valor, (list, tuple, set, pd.Series)):
+                return str(valor[0])
+            return str(valor)
+
+        if st.button("Gerar Melhores Combinações"):
+            dict_tempos = df_editado.set_index("Atleta").to_dict(orient="index")
+            homens = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'M']
+            mulheres = [a for a in atletas_pool if GENERO_ATLETAS.get(a) == 'F']
             
-            if tipo_rev == "4x50m Livre":
-                for combo in combinacoes_validas:
-                    tempos = []
-                    combo_limpo = [extrair_string(a) for a in combo] 
-                    
-                    for a in combo_limpo:
-                        t_str = dict_tempos.get(a, {}).get("Livre", "S/T")
-                        t_sec = tempo_para_segundos(t_str)
-                        tempos.append(t_sec if t_sec else float('inf'))
-                        
-                    if float('inf') not in tempos:
-                        idade_total = sum(calcular_idade(a) for a in combo_limpo)
-                        cat = obter_categoria_revezamento(idade_total)
-                        resultados.append({
-                            "Equipe": " / ".join(combo_limpo), "Categoria": cat,
-                            "Soma Idades": idade_total, "Tempo Total (Seg)": sum(tempos),
-                            "Tempo Estimado": segundos_para_tempo(sum(tempos))
-                        })
+            combinacoes_validas = []
+            if genero_rev == "Masculino":
+                combinacoes_validas = list(itertools.combinations(homens, 4))
+            elif genero_rev == "Feminino":
+                combinacoes_validas = list(itertools.combinations(mulheres, 4))
+            elif genero_rev == "Misto":
+                combos_m = list(itertools.combinations(homens, 2))
+                combos_f = list(itertools.combinations(mulheres, 2))
+                combinacoes_validas = [m + f for m in combos_m for f in combos_f]
+
+            if not combinacoes_validas:
+                st.error(f"Não há atletas suficientes selecionados para formar um revezamento ({genero_rev}).")
             else:
-                for combo in combinacoes_validas:
-                    combo_limpo = [extrair_string(a) for a in combo] 
-                    melhor_t = float('inf')
-                    melhor_ordem = None
-                    
-                    for perm in itertools.permutations(combo_limpo):
-                        t_cos_str = dict_tempos.get(perm[0], {}).get("Costas", "S/T")
-                        t_pei_str = dict_tempos.get(perm[1], {}).get("Peito", "S/T")
-                        t_bor_str = dict_tempos.get(perm[2], {}).get("Borboleta", "S/T")
-                        t_liv_str = dict_tempos.get(perm[3], {}).get("Livre", "S/T")
-                        
-                        t_cos = tempo_para_segundos(t_cos_str) or float('inf')
-                        t_pei = tempo_para_segundos(t_pei_str) or float('inf')
-                        t_bor = tempo_para_segundos(t_bor_str) or float('inf')
-                        t_liv = tempo_para_segundos(t_liv_str) or float('inf')
-                        
-                        soma = t_cos + t_pei + t_bor + t_liv
-                        if soma < melhor_t:
-                            melhor_t = soma
-                            melhor_ordem = perm
+                resultados = []
+                if tipo_rev == "4x50m Livre":
+                    for combo in combinacoes_validas:
+                        tempos = []
+                        combo_limpo = [extrair_string(a) for a in combo] 
+                        for a in combo_limpo:
+                            t_str = dict_tempos.get(a, {}).get("Livre", "S/T")
+                            t_sec = tempo_para_segundos(t_str)
+                            tempos.append(t_sec if t_sec else float('inf'))
                             
-                    if melhor_t != float('inf'):
-                        idade_total = sum(calcular_idade(a) for a in combo_limpo)
-                        cat = obter_categoria_revezamento(idade_total)
-                        resultados.append({
-                            "Equipe": f"Costas: {melhor_ordem[0]} / Peito: {melhor_ordem[1]} / Borboleta: {melhor_ordem[2]} / Livre: {melhor_ordem[3]}", 
-                            "Categoria": cat, "Soma Idades": idade_total, 
-                            "Tempo Total (Seg)": melhor_t, "Tempo Estimado": segundos_para_tempo(melhor_t)
-                        })
+                        if float('inf') not in tempos:
+                            idade_total = sum(calcular_idade(a) for a in combo_limpo)
+                            cat = obter_categoria_revezamento(idade_total)
+                            resultados.append({
+                                "Equipe": " / ".join(combo_limpo), "Categoria": cat,
+                                "Soma Idades": idade_total, "Tempo Total (Seg)": sum(tempos),
+                                "Tempo Estimado": segundos_para_tempo(sum(tempos))
+                            })
+                else:
+                    for combo in combinacoes_validas:
+                        combo_limpo = [extrair_string(a) for a in combo] 
+                        melhor_t = float('inf')
+                        melhor_ordem = None
+                        
+                        for perm in itertools.permutations(combo_limpo):
+                            t_cos_str = dict_tempos.get(perm[0], {}).get("Costas", "S/T")
+                            t_pei_str = dict_tempos.get(perm[1], {}).get("Peito", "S/T")
+                            t_bor_str = dict_tempos.get(perm[2], {}).get("Borboleta", "S/T")
+                            t_liv_str = dict_tempos.get(perm[3], {}).get("Livre", "S/T")
+                            
+                            t_cos = tempo_para_segundos(t_cos_str) or float('inf')
+                            t_pei = tempo_para_segundos(t_pei_str) or float('inf')
+                            t_bor = tempo_para_segundos(t_bor_str) or float('inf')
+                            t_liv = tempo_para_segundos(t_liv_str) or float('inf')
+                            
+                            soma = t_cos + t_pei + t_bor + t_liv
+                            if soma < melhor_t:
+                                melhor_t = soma
+                                melhor_ordem = perm
+                                
+                        if melhor_t != float('inf'):
+                            idade_total = sum(calcular_idade(a) for a in combo_limpo)
+                            cat = obter_categoria_revezamento(idade_total)
+                            resultados.append({
+                                "Equipe": f"Costas: {melhor_ordem[0]} / Peito: {melhor_ordem[1]} / Borboleta: {melhor_ordem[2]} / Livre: {melhor_ordem[3]}", 
+                                "Categoria": cat, "Soma Idades": idade_total, 
+                                "Tempo Total (Seg)": melhor_t, "Tempo Estimado": segundos_para_tempo(melhor_t)
+                            })
 
-            if resultados:
-                df_res = pd.DataFrame(resultados)
-                categorias_encontradas = sorted(df_res["Categoria"].unique(), reverse=True)
-                
-                for cat in categorias_encontradas:
-                    st.markdown(f"### 🏆 Categoria {cat} ({genero_rev})")
-                    df_cat = df_res[df_res["Categoria"] == cat].sort_values("Tempo Total (Seg)").head(3)
-                    st.table(df_cat[["Tempo Estimado", "Soma Idades", "Equipe"]])
-            else:
-                st.warning("Preencha tempos válidos na tabela acima para os atletas selecionados.")
+                if resultados:
+                    df_res = pd.DataFrame(resultados)
+                    categorias_encontradas = sorted(df_res["Categoria"].unique(), reverse=True)
+                    for cat in categorias_encontradas:
+                        st.markdown(f"### 🏆 Categoria {cat} ({genero_rev})")
+                        df_cat = df_res[df_res["Categoria"] == cat].sort_values("Tempo Total (Seg)").head(3)
+                        st.table(df_cat[["Tempo Estimado", "Soma Idades", "Equipe"]])
+                else:
+                    st.warning("Preencha marcas válidas na tabela de ajustes para gerar as simulações.")
+    else:
+        st.info("Selecione atletas para iniciar a montagem do revezamento.")
 
 # ------------------------------------------
-# ABA 4: ALIMENTAR BASE
+# ABA 5: ALIMENTAR BASE
 # ------------------------------------------
-with aba4:
+with aba5:
     st.subheader("Entrada de Dados e Atualização do Painel")
     c_pdf, col_manual = st.columns(2)
     with c_pdf:
         st.markdown("### 📤 Upload de Relatórios oficiais (PDF)")
-        
         tipo_relatorio_selecionado = st.selectbox("Formato do Relatório PDF:", ["UNAMI", "Paulista (FAP)"])
         nome_evento_pdf = st.text_input("Nome/Local da Competição (Ex: Paulista de Inverno - Santo André):", key="nome_ev_pdf")
         data_evento_pdf = st.date_input("Data da Competição:", key="data_ev_pdf")
@@ -557,36 +597,6 @@ with aba4:
                 st.rerun()
 
 # ------------------------------------------
-# ABA 5: ESTATÍSTICAS
-# ------------------------------------------
-with aba5:
-    st.title("📊 Raio-X da Equipe")
-    
-    if not df_historico.empty:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total de Atletas Mapeados", df_historico["Atleta"].nunique())
-        c2.metric("Total de Quedas na Água (Provas)", len(df_historico))
-        c3.metric("Total de Etapas Participadas", df_historico["Local/Etapa"].nunique())
-        
-        st.markdown("---")
-        
-        col_rank1, col_rank2 = st.columns(2)
-        with col_rank1:
-            st.markdown("#### 🏆 Atletas Mais Assíduos (Maior nº de provas)")
-            assiduidade = df_historico["Atleta"].value_counts().reset_index()
-            assiduidade.columns = ["Atleta", "Nº de Provas Nadadas"]
-            st.dataframe(assiduidade.head(10), use_container_width=True, hide_index=True)
-            
-        with col_rank2:
-            st.markdown("#### 🏟️ Etapas com Maior Delegação")
-            delegacao = df_historico.groupby("Local/Etapa")["Atleta"].nunique().reset_index()
-            delegacao.columns = ["Competição", "Tamanho da Equipe"]
-            delegacao = delegacao.sort_values("Tamanho da Equipe", ascending=False)
-            st.dataframe(delegacao, use_container_width=True, hide_index=True)
-    else:
-        st.info("Estatísticas não disponíveis (Base Vazia).")
-
-# ------------------------------------------
 # ABA 6: GERENCIAMENTO E BACKUP
 # ------------------------------------------
 with aba6:
@@ -611,7 +621,7 @@ with aba6:
     with col_upload:
         st.markdown("### 🔄 Restaurar Backup")
         st.markdown("Suba o arquivo CSV de backup aqui para substituir a base atual.")
-        backup_file = st.file_uploader("Envie o backup (CSV):", type=["csv"])
+        backup_file = st.file_uploader("Envie o backup (CSV):", type=["csv"], key="uploader_backup_admin")
         if backup_file is not None:
             if st.button("Restaurar Base de Dados"):
                 try:
