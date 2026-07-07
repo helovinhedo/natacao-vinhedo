@@ -158,7 +158,7 @@ def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
             partes_p = [inline_linha]
             for j in range(1, 4):
                 if idx + j < len(linhas):
-                    next_l = linhas[idx+j].strip()
+                    next_l = lines[idx+j].strip()
                     if any(w in next_l.upper() for w in ["LIVRE", "BORBOLETA", "PEITO", "COSTAS", "MEDLEY", "FEMININO", "MASCULINO", "MISTO", "FEM", "MASC"]):
                         partes_p.append(next_l)
             prova_atual = normalizar_prova(" ".join(partes_p))
@@ -261,30 +261,34 @@ def processar_pdf(pdf_file, tipo_relatorio, nome_evento_manual, data_evento_manu
 CSV_FILE = "historico_vinhedo.csv"
 colunas_padrao = ["Data", "Local/Etapa", "Prova", "Atleta", "Categoria", "Tempo"]
 
+df_historico = None
+
 if os.path.exists(CSV_FILE):
-    try:
-        # SUPER MOTOR DE LEITURA ADAPTATIVA:
-        # Tenta ler com Vírgula + UTF-8 (Padrão)
-        df_historico = pd.read_csv(CSV_FILE, encoding="utf-8")
-        if "Atleta" not in df_historico.columns:
-            # Tenta com Ponto e Vírgula + UTF-8
-            df_historico = pd.read_csv(CSV_FILE, sep=";", encoding="utf-8")
-            
-    except Exception:
+    # Testamos todas as combinações possíveis de separador e codificação
+    combinacoes = [
+        (",", "utf-8"),
+        (";", "utf-8"),
+        (",", "latin1"),
+        (";", "latin1")
+    ]
+    
+    for separador, codificacao in combinacoes:
         try:
-            # Tenta ler no padrão do Excel Brasileiro (Ponto e Vírgula + Latin-1)
-            df_historico = pd.read_csv(CSV_FILE, sep=";", encoding="latin1")
+            df_teste = pd.read_csv(CSV_FILE, sep=separador, encoding=codificacao)
+            # Se a coluna principal estiver no arquivo, encontramos a combinação certa!
+            if "Atleta" in df_teste.columns:
+                df_historico = df_teste
+                break
         except Exception:
-            df_historico = pd.DataFrame(columns=colunas_padrao)
-            
-    # Remove colunas duplicadas que surgiram por edições manuais
-    if "Atleta" in df_historico.columns:
-        df_historico = df_historico.loc[:, ~df_historico.columns.duplicated()].copy()
-        df_historico = df_historico.dropna(how="all")
-    else:
-        df_historico = pd.DataFrame(columns=colunas_padrao)
-else:
+            continue
+
+# Se nenhuma combinação funcionou ou o arquivo não existe, cria um esqueleto vazio
+if df_historico is None:
     df_historico = pd.DataFrame(columns=colunas_padrao)
+else:
+    # Remove colunas duplicadas que surgiram por edições manuais
+    df_historico = df_historico.loc[:, ~df_historico.columns.duplicated()].copy()
+    df_historico = df_historico.dropna(how="all")
 
 # Aplica as limpezas se a base contiver linhas válidas
 if not df_historico.empty:
