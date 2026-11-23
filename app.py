@@ -438,17 +438,17 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             else:
                 sem_parciais_rev = re.sub(r'\([^\)]*\)', '', bloco_rev)
                 sem_parciais_rev = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais_rev, flags=re.IGNORECASE)
-                m_tp = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)\s+(\d{1,2},\d{2})', sem_parciais_rev, re.IGNORECASE)
+                m_tp = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)\s*(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais_rev, re.IGNORECASE)
                 if m_tp:
                     tempo_final = padronizar_tempo_string(m_tp.group(1))
                     pontos_final = float(m_tp.group(2).replace(",", "."))
                 else:
                     m_t_only = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', sem_parciais_rev, re.IGNORECASE)
                     tempo_final = padronizar_tempo_string(m_t_only.group(1)) if m_t_only else "S/T"
-                    m_p_only = re.search(r'\b(\d{1,2},\d{2})\b', sem_parciais_rev)
+                    m_p_only = re.search(r'(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais_rev)
                     pontos_final = float(m_p_only.group(1).replace(",", ".")) if m_p_only else 0.0
 
-            eh_rec_rev = bool(re.search(r'\bRECORD\b', bloco_rev, re.IGNORECASE)) or (pontos_final >= 25.0)
+            eh_rec_rev = bool(re.search(r'(?:^|\b|\d)RECORD\b', bloco_rev, re.IGNORECASE)) or (pontos_final >= 25.0)
             recorde_flag = "Recorde UNAMI" if eh_rec_rev else ""
 
             integrantes_vinhedo = []
@@ -473,58 +473,65 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             i = max(i + 1, k)
             continue
 
-        # 4. INDIVIDUAL VINHEDO (Sem parar em número/matrícula isolada antes do "15,00 Record"!)
+        # 4. INDIVIDUAL VINHEDO (Captura 15,00Record colado e não corta antes do tempo do próximo nadador)
         if not eh_revezamento and ("VINHEDO" in linha_upper or "VINHEDE" in linha_upper):
             bloco_nome = " ".join(linhas[max(0, i-3):min(i+4, len(linhas))])
             atleta_oficial = normalizar_nome_atleta(bloco_nome)
 
             if atleta_oficial != "Atleta Desconhecido":
-                trecho_pos = " ".join(linhas[max(0, i-3):i+1]).replace("|", " ")
+                # Coleta até 2 linhas anteriores somente se pertencerem ao próprio atleta (antes de outro nadador)
+                linhas_prev = []
+                for back in range(i - 1, max(-1, i - 3), -1):
+                    lb = linhas[back]
+                    lb_up = lb.upper()
+                    if re.search(rf'\b({EQUIPES_CONHECIDAS_REGEX})\b', lb_up) or re.search(r'\d{1,2}m\d{2}s\d{2}c?', lb, re.IGNORECASE):
+                        break
+                    linhas_prev.insert(0, lb)
+
+                trecho_pos = " ".join(linhas_prev + [linha]).replace("|", " ")
                 m_pos = re.search(r'(?:^|\s)(\d{1,2})\s+(?:\d{1,2},\d{2}\s+)?\d{2,6}(?:\s|$)', trecho_pos)
                 if not m_pos:
                     m_pos = re.search(r'(?:^|\s)(\d{1,2})\s+[A-ZÀ-ÿ]', trecho_pos)
                 colocacao = int(m_pos.group(1)) if m_pos else 0
 
-                linhas_seq = [linhas[max(0, i-1)], linha]
-                tempos_finais_vistos = 0
-                for k in range(i + 1, min(i + 16, len(linhas))):
-                    lk = linhas[k]
-                    lk_up = lk.upper()
-                    lk_cat = re.sub(r'[\{\}\^]', '', lk_up)
-                    # Para APENAS quando aparece o nome/equipe do próximo nadador, um 2º tempo final, ou nova prova/categoria
-                    if re.match(r'^\d{1,2}\s+\d{2,6}\s+[A-ZÀ-ÿ\|]{2,}', lk):
-                        break
-                    if k > i + 1 and re.search(rf'\b({EQUIPES_CONHECIDAS_REGEX})\b', lk_up) and "VINHEDO" not in lk_up:
-                        break
-                    if re.match(r'^PROVA(?:\s+\d+)?\b', lk_up) or re.match(r'^(?:[A-P1I\$]\s*)?\(\d{2,3}\+\)', lk_cat):
-                        break
-                    if "(" not in lk and not re.match(r'^(?:25|50|100|150|200|250|300|350|400)M\b', lk_up):
-                        if re.search(r'\d{1,2}m\d{2}s\d{2}c?', lk, re.IGNORECASE):
-                            if tempos_finais_vistos >= 1:
-                                break
-                            tempos_finais_vistos += 1
-                    linhas_seq.append(lk)
+                # Verifica se o próprio atleta já está Ausente/DQL logo nas linhas imediatas
+                status_imediato = " ".join(linhas_prev + linhas[i:min(i+3, len(linhas))]).upper()
+                eh_ausente_ou_dql = any(w in status_imediato for w in ["DESCLA", "D*D*", "DQL", "AUSENTE", "Ñ NADOU", "N/C"])
+
+                linhas_seq = linhas_prev + [linha]
+                if not eh_ausente_ou_dql:
+                    tempos_finais_vistos = 0
+                    for k in range(i + 1, min(i + 16, len(linhas))):
+                        lk = linhas[k]
+                        lk_up = lk.upper()
+                        lk_cat = re.sub(r'[\{\}\^]', '', lk_up)
+                        if re.match(r'^PROVA(?:\s+\d+)?\b', lk_up) or re.match(r'^(?:[A-P1I\$]\s*)?\(\d{2,3}\+\)', lk_cat):
+                            break
+                        # Para apenas quando chegar o TEMPO FINAL do próximo nadador (assim captura 15,00Record mesmo se vier após o nome do 2º lugar)
+                        if "(" not in lk and not re.match(r'^(?:25|50|100|150|200|250|300|350|400)M\b', lk_up):
+                            if re.search(r'\d{1,2}m\d{2}s\d{2}c?', lk, re.IGNORECASE):
+                                if tempos_finais_vistos >= 1:
+                                    break
+                                tempos_finais_vistos += 1
+                        linhas_seq.append(lk)
 
                 bloco_fim = " ".join(linhas_seq)
                 bloco_fim_up = bloco_fim.upper()
 
-                if any(w in bloco_fim_up for w in ["DESCLA", "D*D*", "DQL"]):
+                if any(w in status_imediato for w in ["DESCLA", "D*D*", "DQL"]):
                     tempo_final, pontos_final, colocacao = "DQL", 0.0, 0
-                elif any(w in bloco_fim_up for w in ["AUSENTE", "Ñ NADOU", "N/C"]):
+                elif any(w in status_imediato for w in ["AUSENTE", "Ñ NADOU", "N/C"]):
                     tempo_final, pontos_final, colocacao = "Ausente", 0.0, 0
                 else:
                     sem_parciais = re.sub(r'\([^\)]*\)', '', bloco_fim)
                     sem_parciais = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais, flags=re.IGNORECASE)
                     m_t = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', sem_parciais, re.IGNORECASE)
                     tempo_final = padronizar_tempo_string(m_t.group(1)) if m_t else "S/T"
-                    m_pts = re.search(r'\b(\d{1,2},\d{2})\b', sem_parciais)
-                    if m_pts:
-                        pontos_final = float(m_pts.group(1).replace(",", "."))
-                    else:
-                        m_pts_antes = re.search(r'\b(\d{1,2},\d{2})\b', " ".join(linhas[max(0, i-3):i]))
-                        pontos_final = float(m_pts_antes.group(1).replace(",", ".")) if m_pts_antes else 0.0
+                    # (?<!\d)(\d{1,2},\d{2})(?!\d) funciona mesmo quando vem colado como "15,00Record"
+                    m_pts = re.search(r'(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais)
+                    pontos_final = float(m_pts.group(1).replace(",", ".")) if m_pts else 0.0
 
-                eh_recorde = (pontos_final >= 15.0) or bool(re.search(r'\bRECORD\b', bloco_fim, re.IGNORECASE))
+                eh_recorde = (pontos_final >= 15.0) or bool(re.search(r'(?:^|\b|\d)RECORD\b', bloco_fim, re.IGNORECASE))
                 recorde_flag = "Recorde UNAMI" if eh_recorde else ""
 
                 vinhedo_rows.append({
@@ -554,19 +561,6 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
         i += 1
 
     return pd.DataFrame(vinhedo_rows), pd.DataFrame(adversarios_rows)
-
-
-def extrair_colocacao_paulista(texto):
-    """Converte '1°'..'15°' e também '10'..'90' (quando pypdf troca ° por 0) em inteiro."""
-    limpo = re.sub(r'FAIXA\s*:?\s*\|?\s*\d{2,3}\+?', '', texto, flags=re.IGNORECASE)
-    limpo = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\b', '', limpo, flags=re.IGNORECASE)
-    m_deg = re.search(r'(?:^|\s|\|)(\d{1,2})[°º](?:\s|\||$)', limpo)
-    if m_deg:
-        return int(m_deg.group(1))
-    m_zero = re.search(r'(?:^|\s|\|)([1-9])0(?:\s|\||$)', limpo)
-    if m_zero:
-        return int(m_zero.group(1))
-    return 0
 
 
 def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
