@@ -265,7 +265,10 @@ def detectar_metadados_pdf(texto_pag1, nome_arquivo):
     texto_up = texto_limpo.upper()
     nome_arq_clean = os.path.splitext(nome_arquivo)[0]
 
-    if any(k in texto_up for k in ["ABMN", "SWIM IT UP", "PAULISTA", "2.87FAP", "2.72SP", "2.81"]):
+    # Verifica UNAMI primeiro para não confundir com a equipe adversária "APAN Paulista"
+    if "UNAMI" in texto_up or "UNIAO DE NADADORES" in texto_up or "UNIÃO DE NADADORES" in texto_up:
+        campeonato = "UNAMI"
+    elif any(k in texto_up for k in ["FEDERACAO AQUATICA PAULISTA", "FEDERAÇÃO AQUÁTICA PAULISTA", "ABMN", "SWIM IT UP", "2.87FAP", "2.72SP", "2.81"]):
         campeonato = "Paulista"
     else:
         campeonato = "UNAMI"
@@ -314,7 +317,6 @@ def detectar_metadados_pdf(texto_pag1, nome_arquivo):
         nome_evento = re.sub(r'^\d{2}[-/]\d{2}[-/]\d{4}[_\-\s]*', '', nome_arq_clean).replace("_", " ").strip() or nome_arq_clean
 
     return campeonato, data_detectada, nome_evento
-
 # ==========================================
 # --- PARSERS UNIFICADOS E À PROVA DE ERROS ---
 # ==========================================
@@ -370,7 +372,7 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
         linha_upper = linha.upper()
         linha_cat_clean = re.sub(r'[\{\}\^]', '', linha_upper)
 
-        # 1. Cabeçalho de Prova UNAMI (suporta "Prova" isolada em uma linha e o número na seguinte)
+        # 1. Cabeçalho de Prova UNAMI
         if re.match(r'^PROVA(?:\s+\d+)?\b', linha_upper):
             bloco_cab = re.sub(r'[\{\}\^]', '', " ".join(linhas[i:min(i+8, len(linhas))]))
             if re.search(r'(?:4\s*X\s*)?(25|50|100|200|400|800|1500)\s*M', bloco_cab, re.IGNORECASE):
@@ -380,7 +382,7 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
                 if cat_match:
                     categoria_atual = normalizar_categoria(cat_match.group(1))
 
-        # 2. Categoria isolada (inclui A(20+), $G(50+), 1(60+), (60+), 45^{+}, 75^{+})
+        # 2. Categoria isolada
         if "RECORD" not in linha_cat_clean and "INDICE" not in linha_cat_clean and "VINHEDO" not in linha_cat_clean and "_" not in linha_cat_clean:
             cat_inline = re.search(r'(?:[A-P1I\$]\s*)?\((\d{2,3}\+)\)', linha_cat_clean)
             if cat_inline:
@@ -406,7 +408,6 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             if m_cat_rev:
                 categoria_atual = normalizar_categoria(m_cat_rev.group(1))
 
-            # Olha até 2 linhas antes caso "6 990" ou "3 976" tenha quebrado antes do nome da equipe
             linhas_antes_rev = []
             for back in range(max(0, i-2), i):
                 l_b = linhas[back]
@@ -418,7 +419,6 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             while k < min(i + 25, len(linhas)):
                 lk = linhas[k]
                 lk_up = lk.upper()
-                # Para se encontrar outro revezamento (mas não para na continuação "_A_200+ M" da própria equipe na linha i+1)
                 if k > i + 1 and (re.search(PADRAO_CATEGORIA_REV, lk_up) or re.match(r'^PROVA(?:\s+\d+)?\b', lk_up)):
                     break
                 bloco_rev_linhas.append(lk)
@@ -438,7 +438,6 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             else:
                 sem_parciais_rev = re.sub(r'\([^\)]*\)', '', bloco_rev)
                 sem_parciais_rev = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais_rev, flags=re.IGNORECASE)
-                # Pega o primeiro par "tempo + pontos" (ex: "01m59s54c 10,50", ignorando pontos secundários de convidados)
                 m_tp = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)\s+(\d{1,2},\d{2})', sem_parciais_rev, re.IGNORECASE)
                 if m_tp:
                     tempo_final = padronizar_tempo_string(m_tp.group(1))
@@ -474,7 +473,7 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
             i = max(i + 1, k)
             continue
 
-        # 4. INDIVIDUAL VINHEDO (Captura 15,00 Record após parciais e 10,00 antes do nome)
+        # 4. INDIVIDUAL VINHEDO (Sem parar em número/matrícula isolada antes do "15,00 Record"!)
         if not eh_revezamento and ("VINHEDO" in linha_upper or "VINHEDE" in linha_upper):
             bloco_nome = " ".join(linhas[max(0, i-3):min(i+4, len(linhas))])
             atleta_oficial = normalizar_nome_atleta(bloco_nome)
@@ -487,18 +486,23 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
                 colocacao = int(m_pos.group(1)) if m_pos else 0
 
                 linhas_seq = [linhas[max(0, i-1)], linha]
-                for k in range(i + 1, min(i + 14, len(linhas))):
+                tempos_finais_vistos = 0
+                for k in range(i + 1, min(i + 16, len(linhas))):
                     lk = linhas[k]
                     lk_up = lk.upper()
                     lk_cat = re.sub(r'[\{\}\^]', '', lk_up)
-                    if re.match(r'^\d{1,2}\s+\d{2,6}\s+[A-ZÀ-ÿ\|]', lk):
+                    # Para APENAS quando aparece o nome/equipe do próximo nadador, um 2º tempo final, ou nova prova/categoria
+                    if re.match(r'^\d{1,2}\s+\d{2,6}\s+[A-ZÀ-ÿ\|]{2,}', lk):
                         break
-                    if k > i + 1 and re.match(r'^\d{1,2}$', lk) and k + 1 < len(linhas) and (
-                        re.match(r'^\d{1,2},\d{2}$', linhas[k+1]) or re.match(r'^\|?\s*\d{3,6}\b', linhas[k+1])
-                    ):
+                    if k > i + 1 and re.search(rf'\b({EQUIPES_CONHECIDAS_REGEX})\b', lk_up) and "VINHEDO" not in lk_up:
                         break
                     if re.match(r'^PROVA(?:\s+\d+)?\b', lk_up) or re.match(r'^(?:[A-P1I\$]\s*)?\(\d{2,3}\+\)', lk_cat):
                         break
+                    if "(" not in lk and not re.match(r'^(?:25|50|100|150|200|250|300|350|400)M\b', lk_up):
+                        if re.search(r'\d{1,2}m\d{2}s\d{2}c?', lk, re.IGNORECASE):
+                            if tempos_finais_vistos >= 1:
+                                break
+                            tempos_finais_vistos += 1
                     linhas_seq.append(lk)
 
                 bloco_fim = " ".join(linhas_seq)
@@ -517,10 +521,11 @@ def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
                     if m_pts:
                         pontos_final = float(m_pts.group(1).replace(",", "."))
                     else:
-                        m_pts_antes = re.search(r'\b(\d{1,2},\d{2})\b', " ".join(linhas[max(0, i-2):i]))
+                        m_pts_antes = re.search(r'\b(\d{1,2},\d{2})\b', " ".join(linhas[max(0, i-3):i]))
                         pontos_final = float(m_pts_antes.group(1).replace(",", ".")) if m_pts_antes else 0.0
 
-                recorde_flag = "Recorde UNAMI" if pontos_final >= 15.0 else ""
+                eh_recorde = (pontos_final >= 15.0) or bool(re.search(r'\bRECORD\b', bloco_fim, re.IGNORECASE))
+                recorde_flag = "Recorde UNAMI" if eh_recorde else ""
 
                 vinhedo_rows.append({
                     "Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual,
