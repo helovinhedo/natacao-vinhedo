@@ -109,6 +109,7 @@ def normalizar_nome_atleta(nome_bruto):
     if not isinstance(nome_bruto, str):
         return "Atleta Desconhecido"
     nome_upper = " ".join(limpar_homoglifos_gregos(nome_bruto).split()).upper()
+    nome_upper = re.sub(r'(\d)([A-ZÀ-ÿ])', r'\1 \2', nome_upper)
     for chave, nome_oficial in DIC_ATLETAS.items():
         if re.search(rf'\b{re.escape(chave)}\b', nome_upper):
             return nome_oficial
@@ -118,6 +119,7 @@ def limpar_nome_adversario(nome_bruto):
     if not isinstance(nome_bruto, str):
         return ""
     nome = limpar_homoglifos_gregos(nome_bruto)
+    nome = re.sub(r'(\d)([A-ZÀ-ÿ])', r'\1 \2', nome)
     nome = re.sub(r'^\d+\s+', '', nome.strip())
     nome = re.sub(r'\|', ' ', nome)
     nome = re.sub(r'[^A-ZÀ-ÿa-z\s\.]', '', nome)
@@ -244,17 +246,34 @@ def obter_pr_revezamento(df, atleta, estilo_procurado):
     idx_min = df_validos["Segundos"].idxmin()
     return df_validos.loc[idx_min, "Segundos"], df_validos.loc[idx_min, "Tempo"]
 
-def extrair_colocacao_paulista(texto):
-    """Converte '1°'..'15°' e também '10'..'90' (quando pypdf troca ° por 0) em inteiro."""
-    limpo = re.sub(r'FAIXA\s*:?\s*\|?\s*\d{2,3}\+?', '', texto, flags=re.IGNORECASE)
-    limpo = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\b', '', limpo, flags=re.IGNORECASE)
-    m_deg = re.search(r'(?:^|\s|\|)(\d{1,2})[°º](?:\s|\||$)', limpo)
-    if m_deg:
-        return int(m_deg.group(1))
-    m_zero = re.search(r'(?:^|\s|\|)([1-9])0(?:\s|\||$)', limpo)
-    if m_zero:
-        return int(m_zero.group(1))
-    return 0
+# ==========================================
+# --- EXTRAÇÃO DE COORDENADAS VISUAIS (X, Y) ---
+# ==========================================
+def extrair_linhas_visuais_xy(pdf_file):
+    """Reconstrói todas as linhas visuais do PDF ordenadas por (Y descendente, X ascendente)."""
+    reader = PdfReader(pdf_file)
+    all_rows = []
+    for pno, page in enumerate(reader.pages):
+        words = []
+        def visitor(text, cm, tm, font_dict, font_size):
+            t = text.strip()
+            if t:
+                x0 = round(float(tm[4]), 1)
+                y0 = round(float(tm[5]), 1)
+                words.append((x0, y0, t))
+        page.extract_text(visitor_text=visitor)
+        words.sort(key=lambda w: (-w[1], w[0]))
+        rows = []
+        for x0, y0, t in words:
+            if not rows or abs(rows[-1]["y"] - y0) > 2.5:
+                rows.append({"page": pno + 1, "y": y0, "items": [(x0, t)]})
+            else:
+                rows[-1]["items"].append((x0, t))
+        for r in rows:
+            r["items"].sort(key=lambda i: i[0])
+            r["text"] = " ".join([t for _, t in r["items"]])
+        all_rows.extend(rows)
+    return all_rows
 
 # ==========================================
 # --- DETECÇÃO AUTOMÁTICA DE METADADOS DO PDF ---
@@ -304,335 +323,282 @@ def detectar_metadados_pdf(texto_pag1, nome_arquivo):
     return campeonato, data_detectada, nome_evento
 
 # ==========================================
-# --- PARSERS UNIFICADOS E À PROVA DE ERROS ---
+# --- PARSER UNAMI POR COORDENADAS (X, Y) ---
 # ==========================================
-def extrair_dados_adversario_unami(bloco_linhas):
-    texto = " ".join(bloco_linhas[:4]).replace("|", " ")
-    texto = re.sub(r'\s+', ' ', texto).strip()
-
-    m_id = re.search(r'(?:^|\s)(?:\d{1,2}\s+)?(?:\d{1,2},\d{2}\s+)?(0?\d{3,6})\s+([A-ZÀ-ÿ].+)$', texto)
+def extrair_dados_adversario_unami_xy(texto_linha):
+    limpo = limpar_homoglifos_gregos(texto_linha).replace("|", " ")
+    limpo = re.sub(r'\s+', ' ', limpo).strip()
+    m_id = re.match(r'^(?:\d{1,2}\s+)?(0?\d{3,6})\s+(.+)$', limpo)
     if m_id:
         matricula = m_id.group(1).lstrip("0") or m_id.group(1)
         resto = m_id.group(2)
     else:
-        m_mat_only = re.search(r'\b(0?\d{4,6})\b', texto)
-        matricula = (m_mat_only.group(1).lstrip("0") or m_mat_only.group(1)) if m_mat_only else ""
-        resto = re.sub(r'^[\d\s,]+', '', texto)
+        matricula = ""
+        resto = limpo
 
     m_eq = re.search(rf'({EQUIPES_CONHECIDAS_REGEX})', resto, re.IGNORECASE)
     if m_eq:
         nome_raw = resto[:m_eq.start()].strip()
         equipe_raw = resto[m_eq.start():].split("00m")[0].split("01m")[0].split("02m")[0].split("03m")[0].split("Dist")[0].strip()
     else:
-        nome_raw = re.split(r'\d{2}m\d{2}s|D\*D\*|ñ nadou|Ausente|Descla', resto, maxsplit=1)[0].strip()
+        nome_raw = re.split(r'\d{1,2}m\d{2}s|D\*D\*|ñ nadou|Ausente|Descla', resto, maxsplit=1)[0].strip()
         equipe_raw = "Equipe UNAMI"
 
     nome_limpo = limpar_nome_adversario(nome_raw)
-    if len(nome_limpo) < 3: nome_limpo = f"Atleta #{matricula}" if matricula else "Adversário"
+    if len(nome_limpo) < 3:
+        nome_limpo = f"Atleta #{matricula}" if matricula else "Adversário"
     return matricula, nome_limpo, (equipe_raw[:35] if equipe_raw else "Equipe UNAMI")
 
 def processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual):
-    reader = PdfReader(pdf_file)
+    rows = extrair_linhas_visuais_xy(pdf_file)
     vinhedo_rows, adversarios_rows = [], []
-    texto_completo = ""
-    for page in reader.pages: texto_completo += limpar_homoglifos_gregos(page.extract_text() or "") + "\n"
-    linhas = [l.strip() for l in texto_completo.split("\n") if l.strip()]
 
     prova_atual = "Não identificada"
     categoria_atual = "Master"
     eh_revezamento = False
     PADRAO_CATEGORIA_REV = r'(?:_[A-Z0-9]+[\s_]+|\b[A-Z]\s+)(80|100|120|160|200|240|280|320)\+'
 
-    i = 0
-    while i < len(linhas):
-        linha = linhas[i]
+    idx = 0
+    while idx < len(rows):
+        r = rows[idx]
+        linha = limpar_homoglifos_gregos(r["text"]).strip()
         linha_upper = linha.upper()
         linha_cat_clean = re.sub(r'[\{\}\^]', '', linha_upper)
 
+        # 1. Cabeçalho de Prova UNAMI
         if re.match(r'^PROVA(?:\s+\d+)?\b', linha_upper):
-            bloco_cab = re.sub(r'[\{\}\^]', '', " ".join(linhas[i:min(i+8, len(linhas))]))
+            bloco_cab = re.sub(r'[\{\}\^]', '', " ".join([limpar_homoglifos_gregos(rows[j]["text"]) for j in range(idx, min(idx+5, len(rows)))]))
             if re.search(r'(?:4\s*X\s*)?(25|50|100|200|400|800|1500)\s*M', bloco_cab, re.IGNORECASE):
                 prova_atual = normalizar_prova(bloco_cab)
                 eh_revezamento = "4x" in prova_atual.lower()
                 cat_match = re.search(r'\(?(\d{2,3}\+)\)?', bloco_cab)
-                if cat_match: categoria_atual = normalizar_categoria(cat_match.group(1))
+                if cat_match:
+                    categoria_atual = normalizar_categoria(cat_match.group(1))
 
+        # 2. Categoria isolada (ex: A(20+), $G(50+), 1(60+), 45^{+})
         if "RECORD" not in linha_cat_clean and "INDICE" not in linha_cat_clean and "VINHEDO" not in linha_cat_clean and "_" not in linha_cat_clean:
             cat_inline = re.search(r'(?:[A-P1I\$]\s*)?\((\d{2,3}\+)\)', linha_cat_clean)
-            if cat_inline: categoria_atual = normalizar_categoria(cat_inline.group(1))
+            if cat_inline:
+                categoria_atual = normalizar_categoria(cat_inline.group(1))
             elif re.search(r'\b(\d{2,3})\^?\{\+\}', linha_upper):
                 m_brace = re.search(r'\b(\d{2,3})\^?\{\+\}', linha_upper)
                 categoria_atual = normalizar_categoria(m_brace.group(1))
 
-        eh_linha_equipe_rev = (
-            ("VINHEDO" in linha_upper or "VINHEDE" in linha_upper)
-            and normalizar_nome_atleta(linha) == "Atleta Desconhecido"
-            and (eh_revezamento or bool(re.search(PADRAO_CATEGORIA_REV, linha_upper)) or (i + 1 < len(linhas) and bool(re.search(PADRAO_CATEGORIA_REV, linhas[i+1].upper()))))
-        )
+        # 3. REVEZAMENTO UNAMI (Linha principal da equipe: "Pos Matrícula NomeEquipe_Cat_Sexo")
+        m_rev_main = re.match(r'^(\d{1,2})\s+(\d{3,6})\s+(.+)$', linha)
+        eh_inicio_rev = bool(m_rev_main and (eh_revezamento or re.search(PADRAO_CATEGORIA_REV, linha_upper)))
 
-        if eh_linha_equipe_rev:
-            bloco_titulo_rev = (linha_upper + " " + (linhas[i+1].upper() if i + 1 < len(linhas) else ""))
-            m_cat_rev = re.search(r'\b(80|100|120|160|200|240|280|320)\+', bloco_titulo_rev)
-            if m_cat_rev: categoria_atual = normalizar_categoria(m_cat_rev.group(1))
+        if eh_inicio_rev:
+            colocacao = int(m_rev_main.group(1))
+            m_cat_rev = re.search(r'\b(80|100|120|160|200|240|280|320)\+', linha_upper)
+            if m_cat_rev:
+                categoria_atual = normalizar_categoria(m_cat_rev.group(1))
 
-            linhas_antes_rev = []
-            for back in range(max(0, i-2), i):
-                l_b = linhas[back]
-                if not any(x in l_b.upper() for x in ["TOTAL:", "DIST", "PROVA", "RECORD"]) and not re.search(PADRAO_CATEGORIA_REV, l_b.upper()):
-                    linhas_antes_rev.append(l_b)
-
-            bloco_rev_linhas = linhas_antes_rev + [linha]
-            k = i + 1
-            while k < min(i + 25, len(linhas)):
-                lk = linhas[k]
+            bloco_rev_linhas = [linha]
+            k = idx + 1
+            while k < len(rows):
+                lk = limpar_homoglifos_gregos(rows[k]["text"]).strip()
                 lk_up = lk.upper()
-                if k > i + 1 and (re.search(PADRAO_CATEGORIA_REV, lk_up) or re.match(r'^PROVA(?:\s+\d+)?\b', lk_up)): break
+                if re.match(r'^\d{1,2}\s+\d{3,6}\s+', lk) or re.match(r'^PROVA(?:\s+\d+)?\b', lk_up):
+                    break
                 bloco_rev_linhas.append(lk)
                 k += 1
 
             bloco_rev = " ".join(bloco_rev_linhas)
             bloco_rev_up = bloco_rev.upper()
-            trecho_col = " ".join(linhas_antes_rev + [linha])
-            m_col = re.search(r'(?:^|\s)(\d{1,2})\s+\d{3,6}\b', trecho_col)
-            colocacao = int(m_col.group(1)) if m_col else 0
 
-            if any(w in bloco_rev_up for w in ["DESCLA", "D*D*", "DQL", "ERRO CATEGORIA"]):
-                tempo_final, pontos_final, colocacao = "DQL", 0.0, 0
-            elif any(w in bloco_rev_up for w in ["AUSENTE", "Ñ NADOU"]):
-                tempo_final, pontos_final, colocacao = "Ausente", 0.0, 0
-            else:
-                sem_parciais_rev = re.sub(r'\([^\)]*\)', '', bloco_rev)
-                sem_parciais_rev = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais_rev, flags=re.IGNORECASE)
-                m_tp = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)\s*(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais_rev, re.IGNORECASE)
-                if m_tp:
-                    tempo_final, pontos_final = padronizar_tempo_string(m_tp.group(1)), float(m_tp.group(2).replace(",", "."))
+            if "VINHEDO" in linha_upper or "VINHEDE" in linha_upper:
+                if colocacao == 0 or any(w in bloco_rev_up for w in ["DESCLA", "D*D*", "DQL", "ERRO CATEGORIA"]):
+                    tempo_final, pontos_final, colocacao = "DQL", 0.0, 0
+                elif any(w in bloco_rev_up for w in ["AUSENTE", "Ñ NADOU"]):
+                    tempo_final, pontos_final, colocacao = "Ausente", 0.0, 0
                 else:
-                    m_t_only = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', sem_parciais_rev, re.IGNORECASE)
-                    tempo_final = padronizar_tempo_string(m_t_only.group(1)) if m_t_only else "S/T"
-                    m_p_only = re.search(r'(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais_rev)
-                    pontos_final = float(m_p_only.group(1).replace(",", ".")) if m_p_only else 0.0
+                    sem_parciais_rev = re.sub(r'\([^\)]*\)', '', bloco_rev)
+                    sem_parciais_rev = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais_rev, flags=re.IGNORECASE)
+                    m_tp = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)\s*(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais_rev, re.IGNORECASE)
+                    if m_tp:
+                        tempo_final = padronizar_tempo_string(m_tp.group(1))
+                        pontos_final = float(m_tp.group(2).replace(",", "."))
+                    else:
+                        m_t_only = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', sem_parciais_rev, re.IGNORECASE)
+                        tempo_final = padronizar_tempo_string(m_t_only.group(1)) if m_t_only else "S/T"
+                        m_p_only = re.search(r'(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais_rev)
+                        pontos_final = float(m_p_only.group(1).replace(",", ".")) if m_p_only else 0.0
 
-            eh_rec_rev = bool(re.search(r'(?:^|\b|\d)RECORD\b', bloco_rev, re.IGNORECASE)) or (pontos_final >= 25.0)
-            recorde_flag = "Recorde UNAMI" if eh_rec_rev else ""
+                eh_rec_rev = bool(re.search(r'(?:^|\b|\d)RECORD\b', bloco_rev, re.IGNORECASE)) or (pontos_final >= 25.0)
+                recorde_flag = "Recorde UNAMI" if eh_rec_rev else ""
 
-            integrantes_vinhedo = []
-            for sub_l in bloco_rev_linhas[len(linhas_antes_rev)+1:]:
-                atl_cand = normalizar_nome_atleta(sub_l)
-                if atl_cand != "Atleta Desconhecido" and atl_cand not in integrantes_vinhedo:
-                    integrantes_vinhedo.append(atl_cand)
+                integrantes_vinhedo = []
+                for sub_l in bloco_rev_linhas[1:]:
+                    atl_cand = normalizar_nome_atleta(sub_l)
+                    if atl_cand != "Atleta Desconhecido" and atl_cand not in integrantes_vinhedo:
+                        integrantes_vinhedo.append(atl_cand)
 
-            vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": "EQUIPE SEL VINHEDO", "Categoria": categoria_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": pontos_final, "Recorde": recorde_flag, "Integrantes": " / ".join(integrantes_vinhedo)})
-            for atl in integrantes_vinhedo:
-                vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": atl, "Categoria": categoria_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": recorde_flag, "Integrantes": " / ".join(integrantes_vinhedo)})
-            i = max(i + 1, k)
+                vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": "EQUIPE SEL VINHEDO", "Categoria": categoria_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": pontos_final, "Recorde": recorde_flag, "Integrantes": " / ".join(integrantes_vinhedo)})
+                for atl in integrantes_vinhedo:
+                    vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": atl, "Categoria": categoria_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": recorde_flag, "Integrantes": " / ".join(integrantes_vinhedo)})
+            idx = k
             continue
 
-        if not eh_revezamento and ("VINHEDO" in linha_upper or "VINHEDE" in linha_upper):
-            bloco_nome = " ".join(linhas[max(0, i-3):min(i+4, len(linhas))])
-            atleta_oficial = normalizar_nome_atleta(bloco_nome)
+        # 4. INDIVIDUAL UNAMI (Vinhedo + Adversários ancorados na linha principal "Pos Matrícula Nome Equipe")
+        m_ind_main = re.match(r'^(\d{1,2})\s+(0?\d{3,6})\s+([A-ZÀ-ÿ\|].+)$', linha)
+        m_ind_dql = re.match(r'^(0\d{4,5})\s+([A-ZÀ-ÿ\|].+)$', linha)
 
-            if atleta_oficial != "Atleta Desconhecido":
-                linhas_prev = []
-                for back in range(i - 1, max(-1, i - 3), -1):
-                    lb = linhas[back]
-                    if re.search(rf'\b({EQUIPES_CONHECIDAS_REGEX})\b', lb.upper()) or re.search(r'\d{1,2}m\d{2}s\d{2}c?', lb, re.IGNORECASE): break
-                    linhas_prev.insert(0, lb)
+        if not eh_revezamento and (m_ind_main or m_ind_dql) and "PROVA" not in linha_upper and "RECORD" not in linha_upper:
+            colocacao = int(m_ind_main.group(1)) if m_ind_main else 0
 
-                trecho_pos = " ".join(linhas_prev + [linha]).replace("|", " ")
-                m_pos = re.search(r'(?:^|\s)(\d{1,2})\s+(?:\d{1,2},\d{2}\s+)?\d{2,6}(?:\s|$)', trecho_pos)
-                if not m_pos: m_pos = re.search(r'(?:^|\s)(\d{1,2})\s+[A-ZÀ-ÿ]', trecho_pos)
-                colocacao = int(m_pos.group(1)) if m_pos else 0
+            # Coleta todas as sub-linhas do atleta (parciais, pontos, Record) até o próximo atleta ou próxima prova/categoria
+            bloco_atleta_linhas = [linha]
+            k = idx + 1
+            while k < len(rows):
+                lk = limpar_homoglifos_gregos(rows[k]["text"]).strip()
+                lk_up = lk.upper()
+                lk_cat = re.sub(r'[\{\}\^]', '', lk_up)
+                if re.match(r'^\d{1,2}\s+0?\d{3,6}\s+[A-ZÀ-ÿ\|]', lk) or re.match(r'^0\d{4,5}\s+[A-ZÀ-ÿ\|]', lk):
+                    break
+                if re.match(r'^PROVA(?:\s+\d+)?\b', lk_up) or re.match(r'^(?:[A-P1I\$]\s*)?\(\d{2,3}\+\)', lk_cat):
+                    break
+                bloco_atleta_linhas.append(lk)
+                k += 1
 
-                status_imediato = " ".join(linhas_prev + linhas[i:min(i+3, len(linhas))]).upper()
-                eh_ausente_ou_dql = any(w in status_imediato for w in ["DESCLA", "D*D*", "DQL", "AUSENTE", "Ñ NADOU", "N/C"])
+            bloco_completo = " ".join(bloco_atleta_linhas)
+            bloco_up = bloco_completo.upper()
 
-                linhas_seq = linhas_prev + [linha]
-                if not eh_ausente_ou_dql:
-                    tempos_finais_vistos = 0
-                    for k in range(i + 1, min(i + 16, len(linhas))):
-                        lk = linhas[k]
-                        lk_up = lk.upper()
-                        lk_cat = re.sub(r'[\{\}\^]', '', lk_up)
-                        if re.match(r'^PROVA(?:\s+\d+)?\b', lk_up) or re.match(r'^(?:[A-P1I\$]\s*)?\(\d{2,3}\+\)', lk_cat): break
-                        if "(" not in lk and not re.match(r'^(?:25|50|100|150|200|250|300|350|400)M\b', lk_up):
-                            if re.search(r'\d{1,2}m\d{2}s\d{2}c?', lk, re.IGNORECASE):
-                                if tempos_finais_vistos >= 1: break
-                                tempos_finais_vistos += 1
-                        linhas_seq.append(lk)
+            if colocacao == 0 or any(w in bloco_up for w in ["DESCLA", "D*D*", "DQL"]):
+                tempo_final, pontos_final, colocacao = "DQL", 0.0, 0
+            elif any(w in bloco_up for w in ["AUSENTE", "Ñ NADOU", "N/C"]):
+                tempo_final, pontos_final, colocacao = "Ausente", 0.0, 0
+            else:
+                sem_parciais = re.sub(r'\([^\)]*\)', '', bloco_completo)
+                sem_parciais = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais, flags=re.IGNORECASE)
+                m_t = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', sem_parciais, re.IGNORECASE)
+                tempo_final = padronizar_tempo_string(m_t.group(1)) if m_t else "S/T"
+                m_pts = re.search(r'(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais)
+                pontos_final = float(m_pts.group(1).replace(",", ".")) if m_pts else 0.0
 
-                bloco_fim = " ".join(linhas_seq)
-                bloco_fim_up = bloco_fim.upper()
+            eh_recorde = (pontos_final >= 15.0) or bool(re.search(r'(?:^|\b|\d)RECORD\b', bloco_completo, re.IGNORECASE))
+            recorde_flag = "Recorde UNAMI" if eh_recorde else ""
 
-                if any(w in status_imediato for w in ["DESCLA", "D*D*", "DQL"]): tempo_final, pontos_final, colocacao = "DQL", 0.0, 0
-                elif any(w in status_imediato for w in ["AUSENTE", "Ñ NADOU", "N/C"]): tempo_final, pontos_final, colocacao = "Ausente", 0.0, 0
-                else:
-                    sem_parciais = re.sub(r'\([^\)]*\)', '', bloco_fim)
-                    sem_parciais = re.sub(r'\b(?:25|50|100|150|200|250|300|350|400)m\s+\d{1,2}m\d{2}s\d{2}c?', '', sem_parciais, flags=re.IGNORECASE)
-                    m_t = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', sem_parciais, re.IGNORECASE)
-                    tempo_final = padronizar_tempo_string(m_t.group(1)) if m_t else "S/T"
-                    m_pts = re.search(r'(?<!\d)(\d{1,2},\d{2})(?!\d)', sem_parciais)
-                    if m_pts: pontos_final = float(m_pts.group(1).replace(",", "."))
-                    else:
-                        m_pts_antes = re.search(r'\b(\d{1,2},\d{2})\b', " ".join(linhas[max(0, i-3):i]))
-                        pontos_final = float(m_pts_antes.group(1).replace(",", ".")) if m_pts_antes else 0.0
+            if "VINHEDO" in bloco_up or "VINHEDE" in bloco_up:
+                atleta_oficial = normalizar_nome_atleta(linha)
+                if atleta_oficial != "Atleta Desconhecido":
+                    vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Individual", "Atleta": atleta_oficial, "Categoria": categoria_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": pontos_final, "Recorde": recorde_flag, "Integrantes": ""})
+            else:
+                if tempo_para_segundos(tempo_final) is not None:
+                    mat_adv, nome_adv, equipe_adv = extrair_dados_adversario_unami_xy(linha)
+                    adversarios_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Categoria": categoria_atual, "Matricula": mat_adv, "Atleta": nome_adv, "Equipe": equipe_adv, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": pontos_final, "Recorde": recorde_flag})
 
-                eh_recorde = (pontos_final >= 15.0) or bool(re.search(r'(?:^|\b|\d)RECORD\b', bloco_fim, re.IGNORECASE))
-                recorde_flag = "Recorde UNAMI" if eh_recorde else ""
+            idx = k
+            continue
 
-                vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Individual", "Atleta": atleta_oficial, "Categoria": categoria_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": pontos_final, "Recorde": recorde_flag, "Integrantes": ""})
+        idx += 1
 
-        elif not eh_revezamento and re.search(r'\d{1,2}m\d{2}s\d{2}c?', linha, re.IGNORECASE):
-            if "(" not in linha and "RECORD" not in linha_upper and "INDICE" not in linha_upper and not re.match(r'^(25|50|100|150|200|250|300|350|400)M\b', linha_upper):
-                janela_adv = linhas[max(0, i-4):min(i+2, len(linhas))]
-                bloco_adv = " ".join(janela_adv)
-                if "VINHEDO" not in bloco_adv.upper() and "VINHEDE" not in bloco_adv.upper() and "RECORD" not in linhas[max(0, i-1)].upper():
-                    m_t = re.search(r'(\d{1,2}m\d{2}s\d{2}c?)', linha, re.IGNORECASE)
-                    t_adv = padronizar_tempo_string(m_t.group(1)) if m_t else "S/T"
-                    if tempo_para_segundos(t_adv) is not None:
-                        mat_adv, nome_adv, equipe_adv = extrair_dados_adversario_unami(janela_adv)
-                        adversarios_rows.append({"Data": data_evento_manual, "Campeonato": "UNAMI", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Categoria": categoria_atual, "Matricula": mat_adv, "Atleta": nome_adv, "Equipe": equipe_adv, "Colocacao": 0, "Tempo": t_adv, "Pontos": 0.0, "Recorde": ""})
-
-        i += 1
     return pd.DataFrame(vinhedo_rows), pd.DataFrame(adversarios_rows)
 
+# ==========================================
+# --- PARSER PAULISTA POR COORDENADAS (X, Y) ---
+# ==========================================
 def processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual):
-    reader = PdfReader(pdf_file)
+    rows = extrair_linhas_visuais_xy(pdf_file)
     vinhedo_rows, adversarios_rows = [], []
-    texto_completo = ""
-    for page in reader.pages: texto_completo += limpar_homoglifos_gregos(page.extract_text() or "") + "\n"
-    linhas = [l.strip() for l in texto_completo.split("\n") if l.strip()]
 
     prova_atual = "Não identificada"
     faixa_atual = "Master"
     eh_revezamento = False
 
-    i = 0
-    while i < len(linhas):
-        linha = linhas[i]
-        linha_upper = linha.upper()
+    idx = 0
+    while idx < len(rows):
+        r = rows[idx]
+        col_txt = " ".join([t for x, t in r["items"] if x < 48]).strip()
+        matr_txt = " ".join([t for x, t in r["items"] if 48 <= x < 82]).strip()
+        nome_txt = " ".join([t for x, t in r["items"] if 82 <= x < 305]).strip()
+        eq_txt = " ".join([t for x, t in r["items"] if 305 <= x < 415]).strip()
+        tempo_txt = " ".join([t for x, t in r["items"] if 415 <= x < 460]).strip()
+        rec_txt = " ".join([t for x, t in r["items"] if x >= 512]).strip()
 
-        if "PROVA" in linha_upper and ("METROS" in linha_upper or "REVEZAMENTO" in linha_upper):
-            prova_atual = normalizar_prova(linha)
-            eh_revezamento = "REVEZAMENTO" in linha_upper or "4x" in prova_atual.lower()
+        full_line = limpar_homoglifos_gregos(f"{col_txt} {matr_txt} {nome_txt} {eq_txt}").upper()
 
-        if "FAIXA:" in linha_upper:
-            bloco_faixa = " ".join(linhas[i:min(i+4, len(linhas))]).upper()
-            if "PRÉ" in bloco_faixa or "PRE" in bloco_faixa: faixa_atual = "PRÉ-MASTER"
+        # 1. Cabeçalho de Prova (ignora tabelas de recordes)
+        if "PROVA" in full_line and ("METROS" in full_line or "REVEZAMENTO" in full_line) and "RECORDE" not in full_line:
+            prova_atual = normalizar_prova(full_line)
+            eh_revezamento = "REVEZAMENTO" in full_line or "4x" in prova_atual.lower()
+
+        # 2. Faixa Etária
+        if col_txt.upper().startswith("FAIXA"):
+            fx_raw = limpar_homoglifos_gregos(f"{col_txt} {matr_txt} {nome_txt}").upper()
+            if "PRÉ" in fx_raw or "PRE" in fx_raw:
+                faixa_atual = "PRÉ-MASTER"
             else:
-                m_f = re.search(r'FAIXA\s*:?\s*\|?\s*(\d{2,3})\s*\+?', bloco_faixa)
-                if m_f and int(m_f.group(1)) >= 20: faixa_atual = f"{m_f.group(1)}+"
+                m_f = re.search(r'(\d{2,3})', fx_raw)
+                if m_f and int(m_f.group(1)) >= 20:
+                    faixa_atual = f"{m_f.group(1)}+"
 
-        if eh_revezamento and ("VINHEDO" in linha_upper or "SECRETARIA MUNICIPAL DE ESPORTES E LAZER" in linha_upper):
-            trecho_cab_rev = " ".join(linhas[max(0, i-2):min(i+3, len(linhas))])
-            trecho_cab_up = trecho_cab_rev.upper()
+        # 3. Linha de Resultado (Coluna COL possui 1º..99º, N/C ou DQL)
+        is_result_row = bool(re.match(r'^(\d{1,2}[°º]|N/C|DQL)$', col_txt.strip(), re.IGNORECASE))
+        if is_result_row:
+            col_clean = col_txt.strip().upper()
+            col_num = 0 if col_clean in ["N/C", "DQL"] else int(re.sub(r'\D', '', col_clean))
 
-            if "VINHEDO" in trecho_cab_up:
-                colocacao = extrair_colocacao_paulista(trecho_cab_rev)
+            m_mat_split = re.match(r'^(\d{3,7})\s*(.*)$', matr_txt)
+            if m_mat_split:
+                matricula = m_mat_split.group(1)
+                if m_mat_split.group(2):
+                    nome_txt = (m_mat_split.group(2) + " " + nome_txt).strip()
+            else:
+                matricula = ""
 
-                bloco_rev_linhas = [linha]
-                k = i + 1
-                while k < min(i + 15, len(linhas)):
-                    lk = linhas[k]
-                    lk_up = lk.upper()
-                    if any(tag in lk_up for tag in ["FAIXA:", "PROVA", "RECORDE MUNDIAL", "RECORDE PAULISTA", "VISITE NOSSO SITE"]): break
-                    eh_novo_rev = bool(re.match(r'^(?:\d{1,2}[°º]|(?:[1-9]0)|DQL)\b', lk))
-                    eh_nc_outro = lk_up.startswith("N/C") and normalizar_nome_atleta(lk) == "Atleta Desconhecido"
-                    if eh_novo_rev or eh_nc_outro: break
-                    bloco_rev_linhas.append(lk)
+            rec_match = re.search(r'\b(RSP|RS|RB)\b', rec_txt.upper())
+            rec_flag = f"Recorde ({rec_match.group(1)})" if rec_match else ""
+
+            integrantes = []
+            k = idx + 1
+            while k < len(rows):
+                rk = rows[k]
+                k_col = " ".join([t for x, t in rk["items"] if x < 48]).strip()
+                k_mat = " ".join([t for x, t in rk["items"] if 48 <= x < 82]).strip()
+                k_nom = " ".join([t for x, t in rk["items"] if 82 <= x < 305]).strip()
+                k_full = limpar_homoglifos_gregos(f"{k_col} {k_mat} {k_nom}").upper()
+                if re.match(r'^(\d{1,2}[°º]|N/C|DQL)$', k_col, re.IGNORECASE) or k_col.upper().startswith("FAIXA") or ("PROVA" in k_full and "METROS" in k_full):
+                    break
+                if any(h in k_full for h in ["CAMPEONATO PAULISTA", "TROFÉU", "TROFEU", "RESULTADOS", "ABMN COMPETIÇÃO", "VISITE NOSSO SITE", "COL. MATR."]):
                     k += 1
-
-                bloco_rev = " ".join(bloco_rev_linhas)
-                if any(w in trecho_cab_up for w in ["DQL", "DESCLA"]): tempo_final, colocacao = "DQL", 0
-                elif any(w in trecho_cab_up for w in ["N/C", "AUSENTE"]): tempo_final, colocacao = "Ausente", 0
-                else:
-                    sem_parciais_rev = re.sub(r'\([^\)]*\)', '', bloco_rev)
-                    m_tempo = re.search(r'\b(\d{1,2}:\d{2}\.\d{2})\b', sem_parciais_rev)
-                    tempo_final = padronizar_tempo_string(m_tempo.group(1)) if m_tempo else "S/T"
-
-                rec_match = re.search(r'\b(RSP|RS|RB)\b', bloco_rev)
-                recorde_flag = f"Recorde ({rec_match.group(1)})" if rec_match else ""
-
-                integrantes = []
-                for sub_l in bloco_rev_linhas:
-                    atl_cand = normalizar_nome_atleta(sub_l)
-                    if atl_cand != "Atleta Desconhecido" and atl_cand not in integrantes:
-                        integrantes.append(atl_cand)
-
-                vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": "EQUIPE SEL VINHEDO", "Categoria": faixa_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": recorde_flag, "Integrantes": " / ".join(integrantes)})
-                for atl in integrantes:
-                    vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": atl, "Categoria": faixa_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": recorde_flag, "Integrantes": " / ".join(integrantes)})
-                i = max(i + 1, k)
-                continue
-
-        if not eh_revezamento and "VINHEDO" in linha_upper:
-            trecho_antes = " ".join(linhas[max(0, i-3):i+1])
-            atleta_oficial = normalizar_nome_atleta(trecho_antes)
-            if atleta_oficial == "Atleta Desconhecido":
-                atleta_oficial = normalizar_nome_atleta(" ".join(linhas[max(0, i-3):min(i+3, len(linhas))]))
-
-            if atleta_oficial != "Atleta Desconhecido":
-                colocacao = extrair_colocacao_paulista(trecho_antes)
-                bloco_linhas = [linhas[max(0, i-1)], linha]
-                k = i + 1
-                while k < min(i + 9, len(linhas)):
-                    lk = linhas[k]
-                    lk_up = lk.upper()
-                    if (re.match(r'^(?:\d{1,2}[°º]|(?:[1-9]0)|N/C|DQL)\b', lk) or re.match(r'^\d{4,7}\s+[A-ZÀ-ÿ]', lk) or "FAIXA:" in lk_up or "PROVA" in lk_up or "RECORDE MUNDIAL" in lk_up or "RECORDE SUL-AMERICANO" in lk_up or "RECORDE BRASILEIRO" in lk_up or "RECORDE PAULISTA" in lk_up or "VISITE NOSSO SITE" in lk_up): break
-                    bloco_linhas.append(lk)
-                    k += 1
-
-                bloco_p = " ".join(bloco_linhas)
-                if any(w in (trecho_antes + " " + bloco_p).upper() for w in ["DQL", "DESCLA"]): tempo_final, colocacao = "DQL", 0
-                elif any(w in (trecho_antes + " " + bloco_p).upper() for w in ["N/C", "AUSENTE"]): tempo_final, colocacao = "Ausente", 0
-                else:
-                    sem_parciais = re.sub(r'\([^\)]*\)', '', bloco_p)
-                    sem_parciais = re.sub(r'\b\d{2,3}m\s*:?\s*\d{1,2}[:\.]\d{2}(?:\.\d{2})?', '', sem_parciais)
-                    m_t = re.search(r'\b(\d{1,2}:\d{2}\.\d{2}|\d{2}\.\d{2})\b', sem_parciais)
-                    tempo_final = padronizar_tempo_string(m_t.group(1)) if m_t else "S/T"
-
-                rec_match = re.search(r'\b(RSP|RS|RB)\b', bloco_p)
-                recorde_flag = f"Recorde ({rec_match.group(1)})" if rec_match else ""
-
-                vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Individual", "Atleta": atleta_oficial, "Categoria": faixa_atual, "Colocacao": colocacao, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": recorde_flag, "Integrantes": ""})
-                i = max(i + 1, k)
-                continue
-
-        ind_adv = re.match(r'^(\d{1,2}[°º]|(?:[1-9]0))\s+(\d{3,7})\s+(.+)$', linha)
-        if not eh_revezamento and ind_adv:
-            colocacao = extrair_colocacao_paulista(ind_adv.group(1))
-            mat_p = ind_adv.group(2).lstrip("0") or ind_adv.group(2)
-            bloco_linhas = [linha]
-            k = i + 1
-            while k < min(i + 9, len(linhas)):
-                lk = linhas[k]
-                lk_up = lk.upper()
-                if (re.match(r'^(?:\d{1,2}[°º]|(?:[1-9]0)|N/C|DQL)\b', lk) or "FAIXA:" in lk_up or "PROVA" in lk_up or "RECORDE MUNDIAL" in lk_up or "VISITE NOSSO SITE" in lk_up): break
-                bloco_linhas.append(lk)
+                    continue
+                if eh_revezamento and k_mat:
+                    atl_sub = normalizar_nome_atleta(f"{k_mat} {k_nom}")
+                    if atl_sub != "Atleta Desconhecido" and atl_sub not in integrantes:
+                        integrantes.append(atl_sub)
                 k += 1
-            bloco_p = " ".join(bloco_linhas)
-            if "VINHEDO" not in bloco_p.upper():
-                sem_parciais = re.sub(r'\([^\)]*\)', '', bloco_p)
-                sem_parciais = re.sub(r'\b\d{2,3}m\s*:?\s*\d{1,2}[:\.]\d{2}(?:\.\d{2})?', '', sem_parciais)
-                m_t = re.search(r'\b(\d{1,2}:\d{2}\.\d{2}|\d{2}\.\d{2})\b', sem_parciais)
-                t_adv = padronizar_tempo_string(m_t.group(1)) if m_t else "S/T"
-                if tempo_para_segundos(t_adv) is not None:
-                    resto_p = ind_adv.group(3).replace("|", " ")
-                    m_eq = re.search(rf'({EQUIPES_CONHECIDAS_REGEX})', resto_p, re.IGNORECASE)
-                    if m_eq:
-                        nome_adv, eq_adv = limpar_nome_adversario(resto_p[:m_eq.start()]), m_eq.group(0).upper()
-                    else:
-                        nome_adv, eq_adv = limpar_nome_adversario(re.split(r'\d{1,2}[:\.]\d{2}', resto_p)[0]), "Paulista"
-                    adversarios_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Categoria": faixa_atual, "Matricula": mat_p, "Atleta": nome_adv or f"Atleta #{mat_p}", "Equipe": eq_adv, "Colocacao": colocacao, "Tempo": t_adv, "Pontos": 0.0, "Recorde": ""})
-            i = max(i + 1, k)
-            continue
 
-        i += 1
+            tempo_final = padronizar_tempo_string(tempo_txt) if tempo_txt else ("DQL" if col_clean == "DQL" else "Ausente")
+            col_final = col_num if tempo_para_segundos(tempo_final) is not None else 0
+
+            eq_upper = limpar_homoglifos_gregos(eq_txt).upper()
+            if "VINHEDO" in eq_upper or "VINHEDO" in limpar_homoglifos_gregos(nome_txt).upper():
+                if eh_revezamento:
+                    vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": "EQUIPE SEL VINHEDO", "Categoria": faixa_atual, "Colocacao": col_final, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": rec_flag, "Integrantes": " / ".join(integrantes)})
+                    for atl in integrantes:
+                        vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Revezamento", "Atleta": atl, "Categoria": faixa_atual, "Colocacao": col_final, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": rec_flag, "Integrantes": " / ".join(integrantes)})
+                else:
+                    atl_of = normalizar_nome_atleta(nome_txt)
+                    if atl_of != "Atleta Desconhecido":
+                        vinhedo_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Tipo_Prova": "Individual", "Atleta": atl_of, "Categoria": faixa_atual, "Colocacao": col_final, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": rec_flag, "Integrantes": ""})
+            else:
+                if not eh_revezamento and tempo_para_segundos(tempo_final) is not None and matricula:
+                    nome_adv = limpar_nome_adversario(nome_txt)
+                    eq_adv = limpar_homoglifos_gregos(eq_txt).strip() or "Paulista"
+                    adversarios_rows.append({"Data": data_evento_manual, "Campeonato": "Paulista", "Local/Etapa": nome_evento_manual, "Prova": prova_atual, "Categoria": faixa_atual, "Matricula": matricula, "Atleta": nome_adv or f"Atleta #{matricula}", "Equipe": eq_adv[:35], "Colocacao": col_final, "Tempo": tempo_final, "Pontos": 0.0, "Recorde": rec_flag})
+
+            idx = k
+            continue
+        idx += 1
+
     return pd.DataFrame(vinhedo_rows), pd.DataFrame(adversarios_rows)
 
-
 def processar_pdf(pdf_file, tipo_relatorio, nome_evento_manual, data_evento_manual):
-    if tipo_relatorio == "UNAMI": return processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual)
-    else: return processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual)
+    if tipo_relatorio == "UNAMI":
+        return processar_pdf_unami(pdf_file, nome_evento_manual, data_evento_manual)
+    else:
+        return processar_pdf_paulista(pdf_file, nome_evento_manual, data_evento_manual)
 
 # ==========================================
 # --- CARREGAMENTO E MIGRAÇÃO DE BASES ---
@@ -1072,7 +1038,7 @@ elif tela_selecionada == "🚀 Montar Revezamento":
         else: st.info("Nenhum revezamento oficial importado ainda.")
 
 # ------------------------------------------
-# TELA 6: LANÇAR TEMPOS DE TREINO (EXCLUSIVA TREINADOR - 50M EM DIANTE)
+# TELA 6: LANÇAR TEMPOS DE TREINO (50M EM DIANTE)
 # ------------------------------------------
 elif tela_selecionada == "✍️ Lançar Tempos de Treino":
     st.title("✍️ Lançamento Rápido de Treinos (Tomada de Tempo)")
@@ -1117,7 +1083,7 @@ elif tela_selecionada == "✍️ Lançar Tempos de Treino":
 # ------------------------------------------
 elif tela_selecionada == "📤 Importar PDFs de Provas":
     st.title("📤 Importar Resultados Oficiais (PDFs em Lote)")
-    st.markdown("Selecione **todos os PDFs de uma vez** (individuais e/ou revezamentos). O sistema lê os dados, mostra uma **prévia para conferência** e só salva quando você confirmar.")
+    st.markdown("Selecione **todos os PDFs de uma vez** (individuais e/ou revezamentos). O sistema lê os dados pelas coordenadas da página, mostra uma **prévia para conferência** e só salva quando você confirmar.")
 
     uploaded_files = st.file_uploader("Selecione ou arraste todos os PDFs aqui:", type=["pdf"], accept_multiple_files=True)
 
