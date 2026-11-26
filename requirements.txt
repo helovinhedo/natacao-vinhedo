@@ -1,3 +1,5 @@
 streamlit
 pandas
 pypdf
+pdfminer.six
+requests
